@@ -1,22 +1,22 @@
-import {
-	Navigate,
-	RouterProvider,
-	createBrowserRouter,
-	useLocation,
-} from "react-router-dom";
 import { AppShell } from "@/components/layout/app-shell";
+import { useAuth } from "@/features/auth/use-auth";
 import { HomePage } from "@/pages/home-page";
 import { LoginPage } from "@/pages/login-page";
+import { ProfilePage } from "@/pages/profile-page";
 import { RegisterPage } from "@/pages/register-page";
 import { RoomPage } from "@/pages/room-page";
-import { ProfilePage } from "@/pages/profile-page";
 import { SettingsPage } from "@/pages/settings-page";
 import {
 	RoomBannedPage,
 	RoomCapacityPage,
 	RoomExpiredPage,
 } from "@/pages/status-pages";
-import { useAuth } from "@/features/auth/use-auth";
+import {
+	Navigate,
+	RouterProvider,
+	createBrowserRouter,
+	useLocation,
+} from "react-router-dom";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
 	const { user, isLoading } = useAuth();

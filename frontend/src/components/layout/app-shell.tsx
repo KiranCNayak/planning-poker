@@ -1,7 +1,7 @@
-import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/features/auth/use-auth";
+import { Link } from "react-router-dom";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
 	const { user, logout } = useAuth();
