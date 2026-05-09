@@ -1,7 +1,7 @@
 import { Server } from "socket.io";
 import type { Server as HttpServer } from "http";
 import { prisma } from "../../lib/prisma.js";
-import { env } from "../../config/env.js";
+import { corsOrigins } from "../../config/env.js";
 
 const VOTE_VALUES = new Set([
 	"1",
@@ -20,7 +20,7 @@ const VOTE_VALUES = new Set([
 
 export const initSocket = (httpServer: HttpServer) => {
 	const io = new Server(httpServer, {
-		cors: { origin: env.CORS_ORIGIN, credentials: true },
+		cors: { origin: corsOrigins, credentials: true },
 	});
 
 	const nsp = io.of("/room");

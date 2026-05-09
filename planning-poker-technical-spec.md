@@ -614,17 +614,21 @@ Use this as a build order. Each section should be completed and tested before mo
 
 ### Phase 8 — Frontend
 
-- [ ] React + Vite + TypeScript scaffold
-- [ ] Routing: `/`, `/room/:short_code`, `/login`, `/register`
-- [ ] Anonymous JWT + FingerprintJS initialisation on app load
-- [ ] Room creation flow (hCaptcha widget for anonymous users)
-- [ ] Room view: participant list, Fibonacci card picker, vote status indicators
-- [ ] Vote reveal / hide UI (any participant can trigger)
-- [ ] Special card UI: `?` card (discussion prompt), `☕` card (break notification)
-- [ ] Post-reveal statistics panel (average, consensus, `?` count, `☕` count)
-- [ ] Banned / capacity exceeded error screens
-- [ ] Login / register forms + Google OAuth button
-- [ ] Username claim form on first login
+- [x] React + Vite + TypeScript scaffold
+- [x] shadcn-style components + Tailwind setup
+- [x] TanStack Query integration
+- [x] Routing: `/`, `/room/:short_code`, `/login`, `/register`, `/profile`, `/settings`
+- [x] Anonymous bootstrap + FingerprintJS initialisation on app load
+- [x] Access-token auto-refresh and intended-URL redirect after auth
+- [x] Home page: anonymous join flow + authenticated create-room flow
+- [x] Room creation: optional name and creator theme-color picker
+- [x] Room view: participant list, auth/anon badges, vote indicators, and `<count>/<capacity>` header
+- [x] Vote reveal / hide / reset UI (any participant can trigger)
+- [x] Post-reveal statistics panel (average, median, consensus, `?` count, `☕` count)
+- [x] Dedicated room state pages (`banned`, `capacity exceeded`, `expired`)
+- [x] Login / register forms (Google OAuth deferred to fast follow)
+- [ ] Owner moderation UI (ban/list/lift) — fast follow
+- [ ] FE tests (Vitest + RTL smoke coverage) — fast follow
 
 ### Phase 9 — Maintenance jobs
 
@@ -643,6 +647,7 @@ Use this as a build order. Each section should be completed and tested before mo
 - [ ] Redis failover drill: kill Redis, verify fallback to Postgres, verify recovery
 - [ ] Confirm `audit_logs` is truly append-only (attempt UPDATE/DELETE as app user, expect failure)
 - [ ] Confirm short_code collision retry works
+- [ ] Add FE smoke tests (routing/auth guard/room render) after API contract stabilizes
 
 ---
 

@@ -2,7 +2,7 @@ import express from "express";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import helmet from "helmet";
-import { env } from "./config/env.js";
+import { corsOrigins } from "./config/env.js";
 import { optionalAuth } from "./middleware/auth.js";
 import { authRouter } from "./modules/auth/routes.js";
 import { roomsRouter } from "./modules/rooms/routes.js";
@@ -12,7 +12,7 @@ import { bansRouter } from "./modules/bans/routes.js";
 export const createApp = () => {
 	const app = express();
 	app.use(helmet());
-	app.use(cors({ origin: env.CORS_ORIGIN, credentials: true }));
+	app.use(cors({ origin: corsOrigins, credentials: true }));
 	app.use(express.json());
 	app.use(cookieParser());
 	app.use(optionalAuth);

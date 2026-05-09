@@ -28,5 +28,8 @@ else
 fi
 
 if [ "$RUN_FRONTEND" -eq 1 ]; then
-  echo "Frontend changes detected. Frontend checks will be added when frontend scripts exist."
+  echo "Running frontend checks (changed files detected in frontend/)"
+  pnpm -C frontend build
+else
+  echo "No frontend changes detected; skipping frontend checks."
 fi

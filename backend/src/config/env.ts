@@ -23,3 +23,7 @@ const schema = z.object({
 });
 
 export const env = schema.parse(process.env);
+
+export const corsOrigins = env.CORS_ORIGIN.split(",")
+	.map((origin) => origin.trim())
+	.filter(Boolean);

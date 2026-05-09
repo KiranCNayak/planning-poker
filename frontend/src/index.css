@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+	--background: 210 20% 98%;
+	--foreground: 220 22% 16%;
+	--card: 0 0% 100%;
+	--card-foreground: 220 22% 16%;
+	--primary: 212 74% 39%;
+	--primary-foreground: 0 0% 100%;
+	--muted: 210 24% 93%;
+	--muted-foreground: 220 12% 45%;
+	--border: 214 20% 86%;
+	--input: 214 20% 86%;
+	--ring: 212 74% 39%;
+	--destructive: 0 72% 48%;
+	--destructive-foreground: 0 0% 100%;
+	--radius: 0.7rem;
+}
+
+* {
+	@apply border-border;
+}
+
+body {
+	@apply bg-background text-foreground antialiased;
+	font-family:
+		"Segoe UI",
+		"Inter",
+		system-ui,
+		-apple-system,
+		sans-serif;
+}
+
+.page-shell {
+	@apply min-h-screen bg-gradient-to-b from-slate-50 to-slate-100;
+}
