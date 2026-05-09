@@ -1,0 +1,157 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoomHistoryEventType {
+  join
+  leave
+}
+
+enum AuditEventType {
+  vote_cast
+  reveal
+  hide
+  reset
+  join
+  leave
+  room_created
+  kick
+  ban
+}
+
+model User {
+  id              String   @id @default(uuid()) @db.Uuid
+  username        String?  @db.VarChar(50)
+  email           String?  @unique @db.VarChar(255)
+  passwordHash    String?  @map("password_hash")
+  googleId        String?  @unique @map("google_id") @db.VarChar(255)
+  isAnonymous     Boolean  @default(true) @map("is_anonymous")
+  anonId          String?  @map("anon_id") @db.Uuid
+  roomCreateLimit Int      @default(30) @map("room_create_limit")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  roomsOwned      Room[]
+  roomSessions    RoomSession[]
+  roomHistory     RoomParticipantHistory[]
+  auditLogs       AuditLog[]
+  usernameReservation UsernameReservation?
+
+  @@map("users")
+}
+
+model Room {
+  id             String   @id @default(uuid()) @db.Uuid
+  shortCode      String   @unique @map("short_code") @db.VarChar(36)
+  ownerId        String   @map("owner_id") @db.Uuid
+  name           String?  @db.VarChar(40)
+  isActive       Boolean  @default(true) @map("is_active")
+  capacity       Int      @default(100)
+  votesRevealed  Boolean  @default(false) @map("votes_revealed")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt      DateTime? @map("expires_at") @db.Timestamptz(6)
+  lastActivityAt DateTime @default(now()) @map("last_activity_at") @db.Timestamptz(6)
+
+  owner          User     @relation(fields: [ownerId], references: [id])
+  sessions       RoomSession[]
+  participantHistory RoomParticipantHistory[]
+  auditLogs      AuditLog[]
+  bans           RoomBan[]
+
+  @@map("rooms")
+}
+
+model RoomSession {
+  id          String   @id @default(uuid()) @db.Uuid
+  roomId      String   @map("room_id") @db.Uuid
+  identityKey String   @map("identity_key") @db.VarChar(255)
+  userId      String?  @map("user_id") @db.Uuid
+  displayName String   @map("display_name") @db.VarChar(50)
+  currentVote String?  @map("current_vote") @db.VarChar(5)
+  joinedAt    DateTime @default(now()) @map("joined_at") @db.Timestamptz(6)
+  lastSeenAt  DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  leftAt      DateTime? @map("left_at") @db.Timestamptz(6)
+
+  room        Room     @relation(fields: [roomId], references: [id])
+  user        User?    @relation(fields: [userId], references: [id])
+
+  @@unique([roomId, identityKey], name: "room_sessions_room_id_identity_key_key")
+  @@index([roomId, leftAt])
+  @@map("room_sessions")
+}
+
+model RoomParticipantHistory {
+  id          String   @id @default(uuid()) @db.Uuid
+  roomId      String   @map("room_id") @db.Uuid
+  identityKey String   @map("identity_key") @db.VarChar(255)
+  userId      String?  @map("user_id") @db.Uuid
+  displayName String   @map("display_name") @db.VarChar(50)
+  eventType   RoomHistoryEventType @map("event_type")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  room        Room     @relation(fields: [roomId], references: [id])
+  user        User?    @relation(fields: [userId], references: [id])
+
+  @@index([roomId, createdAt])
+  @@map("room_participant_history")
+}
+
+model AuditLog {
+  id        BigInt   @id @default(autoincrement())
+  roomId    String?  @map("room_id") @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  eventType AuditEventType @map("event_type")
+  payload   Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  room      Room?    @relation(fields: [roomId], references: [id])
+  user      User?    @relation(fields: [userId], references: [id])
+
+  @@index([roomId, createdAt])
+  @@map("audit_logs")
+}
+
+model UsernameReservation {
+  username  String   @id @db.VarChar(50)
+  userId    String   @unique @map("user_id") @db.Uuid
+  claimedAt DateTime @default(now()) @map("claimed_at") @db.Timestamptz(6)
+
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@map("username_reservations")
+}
+
+model RateLimitViolation {
+  id             BigInt   @id @default(autoincrement())
+  identityKey    String   @map("identity_key") @db.VarChar(255)
+  endpoint       String   @db.VarChar(100)
+  violationCount Int      @default(1) @map("violation_count")
+  firstSeen      DateTime @default(now()) @map("first_seen") @db.Timestamptz(6)
+  lastSeen       DateTime @default(now()) @map("last_seen") @db.Timestamptz(6)
+  isBlocked      Boolean  @default(false) @map("is_blocked")
+
+  @@index([identityKey, endpoint])
+  @@map("rate_limit_violations")
+}
+
+model RoomBan {
+  id             String   @id @default(uuid()) @db.Uuid
+  roomId         String   @map("room_id") @db.Uuid
+  identityKey    String   @map("identity_key") @db.VarChar(255)
+  bannedByUserId String   @map("banned_by_user_id") @db.Uuid
+  reason         String?
+  tier           Int
+  expiresAt      DateTime? @map("expires_at") @db.Timestamptz(6)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  liftedAt       DateTime? @map("lifted_at") @db.Timestamptz(6)
+  liftedByUserId String? @map("lifted_by_user_id") @db.Uuid
+
+  room           Room     @relation(fields: [roomId], references: [id])
+
+  @@index([roomId, identityKey, liftedAt])
+  @@map("room_bans")
+}

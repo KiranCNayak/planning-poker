@@ -29,12 +29,12 @@ A real-time, collaborative story point estimation tool. Multiple users join a na
 
 ### Core requirements summary
 
-- Anyone can create a room without logging in.
+- Only authenticated users can create rooms.
 - Rooms are shareable via a short URL (`/room/:short_code`).
 - Participants see who is in the room; vote values are hidden until revealed.
 - Any participant can reveal or hide votes.
-- Authenticated users get higher room creation limits and persistent rooms.
-- Anonymous users are identified by a durable browser fingerprint + UUID.
+- Authenticated users can create rooms and get persistent rooms.
+- Anonymous users can only join existing rooms and are identified by anon_id + fingerprint/IP risk signals.
 - Rooms have a capacity limit of 100 participants.
 - All participant actions are recorded in an audit log.
 - Abuse is mitigated via rate limiting, hCaptcha verification, and ban escalation.
@@ -43,21 +43,21 @@ A real-time, collaborative story point estimation tool. Multiple users join a na
 
 ## 2. Tech stack
 
-| Layer                  | Choice                           | Reason                                                                               |
-| ---------------------- | -------------------------------- | ------------------------------------------------------------------------------------ |
-| Backend runtime        | Node.js + TypeScript             | I/O-bound workload; natural fit for WebSocket fan-outs                               |
-| HTTP framework         | Express                          | Mature, minimal, well-understood                                                     |
-| WebSocket              | Socket.IO                        | Built-in rooms, reconnection handling, Redis adapter support                         |
-| ORM                    | Prisma                           | Type-safe, migration-based, works well with Postgres                                 |
-| Primary database       | PostgreSQL                       | Strong consistency, JSONB for audit payloads, advisory locks for username uniqueness |
-| Session / state store  | Redis                            | Sub-millisecond room state reads, rate limit counters, presence tracking             |
-| Frontend               | React + Vite + TypeScript        | SPA with URL-based routing                                                           |
-| Auth (social)          | Google OAuth 2.0 via Passport.js | Standard integration path                                                            |
-| Auth (local)           | JWT + bcrypt                     | Password hashing, signed tokens                                                      |
-| CAPTCHA                | hCaptcha                         | Server-side token verification; one-time token with replay prevention                |
-| Browser fingerprinting | FingerprintJS (open-source)      | Stable cross-incognito ID derived from browser signals; no stored state              |
-| Background jobs        | Node `setInterval` + pg cron     | Periodic vote sync and daily cleanup                                                 |
-| Horizontal scaling     | Socket.IO Redis adapter          | Pub/sub events across multiple Node instances                                        |
+| Layer                  | Choice                       | Reason                                                                               |
+| ---------------------- | ---------------------------- | ------------------------------------------------------------------------------------ |
+| Backend runtime        | Node.js + TypeScript         | I/O-bound workload; natural fit for WebSocket fan-outs                               |
+| HTTP framework         | Express                      | Mature, minimal, well-understood                                                     |
+| WebSocket              | Socket.IO                    | Built-in rooms, reconnection handling, Redis adapter support                         |
+| ORM                    | Prisma                       | Type-safe, migration-based, works well with Postgres                                 |
+| Primary database       | PostgreSQL                   | Strong consistency, JSONB for audit payloads, advisory locks for username uniqueness |
+| Session / state store  | Redis                        | Sub-millisecond room state reads, rate limit counters, presence tracking             |
+| Frontend               | React + Vite + TypeScript    | SPA with URL-based routing                                                           |
+| Auth (social)          | Deferred (post-v1)           | Local auth first to reduce integration complexity                                    |
+| Auth (local)           | JWT + bcrypt                 | Password hashing, signed tokens                                                      |
+| CAPTCHA                | hCaptcha                     | Server-side token verification; one-time token with replay prevention                |
+| Browser fingerprinting | FingerprintJS (open-source)  | Stable cross-incognito ID derived from browser signals; no stored state              |
+| Background jobs        | Node `setInterval` + pg cron | Periodic vote sync and daily cleanup                                                 |
+| Horizontal scaling     | Socket.IO Redis adapter      | Pub/sub events across multiple Node instances                                        |
 
 ---
 
@@ -65,7 +65,7 @@ A real-time, collaborative story point estimation tool. Multiple users join a na
 
 ### 3.1 Anonymous users
 
-Every unauthenticated visitor is issued a signed JWT on first contact. The token contains a UUID (`anon_id`) and is stored in `localStorage`.
+Every unauthenticated visitor is issued a signed JWT on first contact. The token is stored in an HttpOnly cookie; only `anon_id` is client-visible.
 
 Anonymous identity and abuse controls use a hybrid model:
 
@@ -79,7 +79,7 @@ Canonical identity key format used across rate limiting, bans, and audit payload
 
 ### 3.2 Authenticated users
 
-Two paths: Google OAuth 2.0 and local email/password (bcrypt + JWT).
+Local email/password (bcrypt + JWT access token + rotating refresh token).
 
 On login, the server checks for an existing `anon_id` in the request (passed from the client's localStorage). If found, it merges the anon identity into the new or existing user record using identity-linking records. Audit rows are not rewritten.
 
@@ -111,8 +111,8 @@ Presence is tracked in Redis with a heartbeat pattern:
 - On join: `SET session:{identity_key} {user_id} EX 60`
 - On every WS interaction: `EXPIRE session:{identity_key} 60`
 - On reconnect: check if `session:{identity_key}` exists in Redis.
-  - **Hit (within 60s)**: restore previous session. Participant count unchanged. Vote from Redis vote hash is restored into the new socket.
-  - **Miss (> 60s)**: check `room_sessions` for an active row in the same room. If found, treat as reconnect and do not increment participant count. Otherwise treat as a new join.
+    - **Hit (within 60s)**: restore previous session. Participant count unchanged. Vote from Redis vote hash is restored into the new socket.
+    - **Miss (> 60s)**: check `room_sessions` for an active row in the same room. If found, treat as reconnect and do not increment participant count. Otherwise treat as a new join.
 
 **Known edge case**: if a user disconnects during an active reveal window and misses within 60 seconds, their vote is restored correctly. If they miss the window, they rejoin with no vote and see the revealed results as a new participant. This is acceptable behaviour — the alternative (holding reveals until all disconnected users timeout) creates a worse UX.
 
@@ -174,16 +174,15 @@ Escalation: 3 violations within 1 hour → `is_blocked = true` + Redis block key
 ### 5.1 Creation
 
 ```text
-POST /api/rooms
+POST /api/rooms (authenticated only)
   1. Resolve identity key (primary id + fingerprint/IP risk tuple)
   2. Check is_blocked in Redis
   3. Sliding window rate limit check
-  4. For anonymous users: verify hCaptcha token (one-time, server-side)
-  5. Generate short_code (nanoid, 8 chars, alphanumeric)
-  6. INSERT into rooms — retry up to 3 times on short_code collision
-  7. Seed Redis: HSET room:{id} votes_revealed 0, owner_id {id}
-  8. Write room_created event to audit_log (same transaction as INSERT)
-  9. Return { room_id, short_code, url: "/room/:short_code" }
+  4. Generate short_code (UUID-style, non-predictable)
+  5. INSERT into rooms — retry up to 3 times on short_code collision
+  6. Seed Redis: HSET room:{id} votes_revealed 0, owner_id {id}
+  7. Write room_created event to audit_log (same transaction as INSERT)
+  8. Return { room_id, short_code, url: "/room/:short_code" }
 ```
 
 ### 5.2 Joining
@@ -334,7 +333,7 @@ created_at        timestamptz
 
 ```sql
 id                uuid        PK
-short_code        varchar(8)  unique not null
+short_code        varchar(36) unique not null
 owner_id          uuid        FK → users
 name              varchar(100)
 is_active         boolean     default true
@@ -502,7 +501,7 @@ The room owner can manually lift a ban via an owner-only REST endpoint that upda
 
 ### 11.3 Short_code collision handling
 
-`short_code` is generated via nanoid (8 chars, alphanumeric). On INSERT collision (unique constraint violation):
+`short_code` is generated as UUID-style (36 chars). On INSERT collision (unique constraint violation):
 
 - Retry up to 3 times with a newly generated code.
 - After 3 failures, return HTTP 500 and alert (should be astronomically rare).
@@ -559,16 +558,16 @@ Use this as a build order. Each section should be completed and tested before mo
 
 ### Phase 2 — Auth service
 
-- [ ] Anonymous JWT issuance on first request (UUID generation, signed token, localStorage)
+- [ ] Anonymous JWT issuance on first request (UUID generation, signed token in HttpOnly cookie + anon_id returned)
 - [ ] Local registration and login (bcrypt, JWT)
-- [ ] Google OAuth 2.0 via Passport.js
+- [ ] Refresh token rotation (1 month) via HttpOnly cookie
 - [ ] Identity merge flow (anon → authenticated)
 - [ ] Username claim endpoint with advisory lock + 409 on conflict
 - [ ] FingerprintJS integration on the client
 
 ### Phase 3 — REST API
 
-- [ ] `POST /api/rooms` — create room (with rate limiting + hCaptcha for anon)
+- [ ] `POST /api/rooms` — create room (authenticated only)
 - [ ] `GET /api/rooms/:short_code` — room metadata
 - [ ] `DELETE /api/rooms/:short_code` — deactivate room (owner only)
 - [ ] `GET /api/users/me` — current user profile
@@ -582,7 +581,7 @@ Use this as a build order. Each section should be completed and tested before mo
 - [ ] Redis sliding window middleware (configurable per endpoint)
 - [ ] `rate_limit_violations` write on breach
 - [ ] Block check before rate limit logic
-- [ ] hCaptcha server-side verification for anonymous room creation
+- [ ] hCaptcha verification hooks for anonymous join abuse (feature-flagged, default off in local)
 - [ ] One-time token storage in Redis (replay prevention)
 - [ ] `hostname` validation in hCaptcha response
 - [ ] 30-second cooldown after successful CAPTCHA

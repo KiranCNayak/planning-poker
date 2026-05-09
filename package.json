@@ -1,0 +1,34 @@
+{
+	"name": "planning-poker",
+	"private": true,
+	"version": "0.1.0",
+	"packageManager": "pnpm@10.0.0",
+	"scripts": {
+		"prepare": "husky",
+		"dev": "pnpm -r dev",
+		"build": "pnpm -r build",
+		"test": "pnpm -r test",
+		"lint": "pnpm lint:backend",
+		"lint:backend": "eslint backend/src backend/tests --ext .ts",
+		"lint:backend:fix": "eslint backend/src backend/tests --ext .ts --fix",
+		"format": "prettier --write .",
+		"format:check": "prettier --check ."
+	},
+	"lint-staged": {
+		"*.{ts,tsx,js,jsx,cjs,mjs,json,md,yml,yaml}": [
+			"prettier --write"
+		],
+		"backend/**/*.{ts,tsx,js,jsx}": [
+			"eslint --fix"
+		]
+	},
+	"devDependencies": {
+		"@eslint/js": "^10.0.1",
+		"eslint": "^10.3.0",
+		"eslint-config-prettier": "^10.1.8",
+		"husky": "^9.1.7",
+		"lint-staged": "^17.0.3",
+		"prettier": "^3.8.3",
+		"typescript-eslint": "^8.59.2"
+	}
+}
