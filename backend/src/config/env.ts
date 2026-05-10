@@ -25,6 +25,10 @@ const schema = z.object({
 	// 0 = direct (no gateway). Set to 1 behind a single nginx/API gateway that
 	// forwards X-Forwarded-For. Mirrors Express's `trust proxy` semantics.
 	TRUST_PROXY: z.coerce.number().int().min(0).default(0),
+	// Shared invite code gating self-registration. When non-empty, every
+	// /api/auth/register request must supply a matching `inviteCode`.
+	// Empty (the default) disables the check, which is the dev experience.
+	INVITE_CODE: z.string().default(""),
 });
 
 export const env = schema.parse(process.env);
