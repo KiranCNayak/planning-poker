@@ -9,8 +9,12 @@ const h = (value: string) =>
 		.digest("hex")
 		.slice(0, 24);
 
-export const buildIdentityKey = (req: Request, primaryId: string) => {
-	const fp = String(req.header("x-fingerprint") ?? "unknown");
-	const ip = req.ip ?? "unknown";
-	return `id:${primaryId}|fp:${h(fp)}|ip:${h(ip)}`;
-};
+export const buildIdentityKey = (primaryId: string, fp: string, ip: string) =>
+	`id:${primaryId}|fp:${h(fp)}|ip:${h(ip)}`;
+
+export const buildIdentityKeyFromRequest = (req: Request, primaryId: string) =>
+	buildIdentityKey(
+		primaryId,
+		req.header("x-fingerprint") ?? "unknown",
+		req.ip ?? "unknown",
+	);

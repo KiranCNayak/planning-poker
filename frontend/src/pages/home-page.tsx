@@ -7,31 +7,20 @@ import { apiFetch } from "@/lib/http";
 import { FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-const COLOR_OPTIONS = [
-	{ label: "Classic Blue", value: "212 74% 39%" },
-	{ label: "Slate", value: "220 14% 36%" },
-	{ label: "Emerald", value: "160 84% 29%" },
-];
-
 export function HomePage() {
 	const { user } = useAuth();
 	const navigate = useNavigate();
 	const [joinCode, setJoinCode] = useState("");
 	const [roomName, setRoomName] = useState("");
-	const [theme, setTheme] = useState(COLOR_OPTIONS[0].value);
 	const [error, setError] = useState<string | null>(null);
 
 	const createRoom = async (e: FormEvent) => {
 		e.preventDefault();
 		setError(null);
 		try {
-			const payload = {
-				name: roomName || undefined,
-				themePrimary: theme,
-			};
 			const room = await apiFetch<{ shortCode: string }>("/api/rooms", {
 				method: "POST",
-				body: JSON.stringify(payload),
+				body: JSON.stringify({ name: roomName || undefined }),
 			});
 			navigate(`/room/${room.shortCode}`);
 		} catch (err) {
@@ -95,23 +84,6 @@ export function HomePage() {
 									}
 									placeholder="Sprint Planning - Team A"
 								/>
-							</div>
-							<div className="space-y-2">
-								<Label>Theme Color</Label>
-								<div className="grid grid-cols-3 gap-2">
-									{COLOR_OPTIONS.map((opt) => (
-										<button
-											type="button"
-											key={opt.value}
-											onClick={() => setTheme(opt.value)}
-											className={`h-10 rounded-md border ${theme === opt.value ? "ring-2 ring-ring" : ""}`}
-											style={{
-												backgroundColor: `hsl(${opt.value})`,
-											}}
-											aria-label={opt.label}
-										/>
-									))}
-								</div>
 							</div>
 							{error ? (
 								<p className="text-sm text-destructive">

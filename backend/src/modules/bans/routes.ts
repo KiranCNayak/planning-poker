@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma.js";
+import { asyncHandler } from "../../lib/asyncHandler.js";
 import { requireAuth } from "../../middleware/auth.js";
 
 const banSchema = z.object({
@@ -20,76 +21,96 @@ const ownerRoom = async (shortCode: string, userId: string) => {
 	return room;
 };
 
-bansRouter.get("/", requireAuth, async (req, res) => {
-	const room = await ownerRoom(req.params.shortCode, req.auth!.sub);
-	if (room === undefined) return res.status(403).json({ error: "FORBIDDEN" });
-	if (!room) return res.status(404).json({ error: "ROOM_NOT_FOUND" });
+bansRouter.get(
+	"/",
+	requireAuth,
+	asyncHandler(async (req, res) => {
+		const room = await ownerRoom(req.params.shortCode, req.auth!.sub);
+		if (room === undefined)
+			return res.status(403).json({ error: "FORBIDDEN" });
+		if (!room) return res.status(404).json({ error: "ROOM_NOT_FOUND" });
 
-	const bans = await prisma.roomBan.findMany({
-		where: { roomId: room.id, liftedAt: null },
-	});
-	return res.json({ bans });
-});
+		const bans = await prisma.roomBan.findMany({
+			where: { roomId: room.id, liftedAt: null },
+		});
+		return res.json({ bans });
+	}),
+);
 
-bansRouter.post("/", requireAuth, async (req, res) => {
-	const room = await ownerRoom(req.params.shortCode, req.auth!.sub);
-	if (room === undefined) return res.status(403).json({ error: "FORBIDDEN" });
-	if (!room) return res.status(404).json({ error: "ROOM_NOT_FOUND" });
+bansRouter.post(
+	"/",
+	requireAuth,
+	asyncHandler(async (req, res) => {
+		const room = await ownerRoom(req.params.shortCode, req.auth!.sub);
+		if (room === undefined)
+			return res.status(403).json({ error: "FORBIDDEN" });
+		if (!room) return res.status(404).json({ error: "ROOM_NOT_FOUND" });
 
-	const parsed = banSchema.safeParse(req.body);
-	if (!parsed.success) return res.status(400).json({ error: "BAD_REQUEST" });
+		const parsed = banSchema.safeParse(req.body);
+		if (!parsed.success)
+			return res.status(400).json({ error: "BAD_REQUEST" });
 
-	let identityKey = parsed.data.targetIdentityKey;
-	if (!identityKey && parsed.data.targetUserId) {
-		const session = await prisma.roomSession.findFirst({
-			where: {
+		let identityKey = parsed.data.targetIdentityKey;
+		if (!identityKey && parsed.data.targetUserId) {
+			const session = await prisma.roomSession.findFirst({
+				where: {
+					roomId: room.id,
+					userId: parsed.data.targetUserId,
+					leftAt: null,
+				},
+			});
+			identityKey = session?.identityKey;
+		}
+
+		if (!identityKey)
+			return res.status(400).json({ error: "MISSING_TARGET" });
+
+		const priorCount = await prisma.roomBan.count({
+			where: { roomId: room.id, identityKey },
+		});
+		const tier = priorCount + 1;
+		const minutes = tier === 1 ? 10 : tier === 2 ? 60 : null;
+		const expiresAt = minutes
+			? new Date(Date.now() + minutes * 60_000)
+			: null;
+
+		const ban = await prisma.roomBan.create({
+			data: {
 				roomId: room.id,
-				userId: parsed.data.targetUserId,
-				leftAt: null,
+				identityKey,
+				bannedByUserId: req.auth!.sub,
+				reason: parsed.data.reason,
+				tier,
+				expiresAt,
 			},
 		});
-		identityKey = session?.identityKey;
-	}
 
-	if (!identityKey) return res.status(400).json({ error: "MISSING_TARGET" });
+		return res.status(201).json({ ban });
+	}),
+);
 
-	const priorCount = await prisma.roomBan.count({
-		where: { roomId: room.id, identityKey },
-	});
-	const tier = priorCount + 1;
-	const minutes = tier === 1 ? 10 : tier === 2 ? 60 : null;
-	const expiresAt = minutes ? new Date(Date.now() + minutes * 60_000) : null;
+bansRouter.post(
+	"/lift",
+	requireAuth,
+	asyncHandler(async (req, res) => {
+		const room = await ownerRoom(req.params.shortCode, req.auth!.sub);
+		if (room === undefined)
+			return res.status(403).json({ error: "FORBIDDEN" });
+		if (!room) return res.status(404).json({ error: "ROOM_NOT_FOUND" });
 
-	const ban = await prisma.roomBan.create({
-		data: {
-			roomId: room.id,
-			identityKey,
-			bannedByUserId: req.auth!.sub,
-			reason: parsed.data.reason,
-			tier,
-			expiresAt,
-		},
-	});
+		const parsed = liftSchema.safeParse(req.body);
+		if (!parsed.success)
+			return res.status(400).json({ error: "BAD_REQUEST" });
 
-	return res.status(201).json({ ban });
-});
+		await prisma.roomBan.updateMany({
+			where: {
+				roomId: room.id,
+				identityKey: parsed.data.identityKey,
+				liftedAt: null,
+			},
+			data: { liftedAt: new Date(), liftedByUserId: req.auth!.sub },
+		});
 
-bansRouter.post("/lift", requireAuth, async (req, res) => {
-	const room = await ownerRoom(req.params.shortCode, req.auth!.sub);
-	if (room === undefined) return res.status(403).json({ error: "FORBIDDEN" });
-	if (!room) return res.status(404).json({ error: "ROOM_NOT_FOUND" });
-
-	const parsed = liftSchema.safeParse(req.body);
-	if (!parsed.success) return res.status(400).json({ error: "BAD_REQUEST" });
-
-	await prisma.roomBan.updateMany({
-		where: {
-			roomId: room.id,
-			identityKey: parsed.data.identityKey,
-			liftedAt: null,
-		},
-		data: { liftedAt: new Date(), liftedByUserId: req.auth!.sub },
-	});
-
-	return res.status(204).send();
-});
+		return res.status(204).send();
+	}),
+);

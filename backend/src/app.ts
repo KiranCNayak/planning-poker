@@ -1,4 +1,8 @@
-import express from "express";
+import express, {
+	type NextFunction,
+	type Request,
+	type Response,
+} from "express";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import helmet from "helmet";
@@ -23,6 +27,13 @@ export const createApp = () => {
 	app.use("/api/rooms", roomsRouter);
 	app.use("/api/rooms/:shortCode/bans", bansRouter);
 	app.use("/api/users", usersRouter);
+
+	app.use(
+		(err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+			console.error(err);
+			res.status(500).json({ error: "INTERNAL_ERROR" });
+		},
+	);
 
 	return app;
 };

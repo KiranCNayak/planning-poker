@@ -15,6 +15,7 @@ const schema = z.object({
 	REDIS_URL: z.string().min(1).default("redis://localhost:6379"),
 	JWT_ACCESS_SECRET: z.string().min(16).default("change-me-access-secret"),
 	JWT_REFRESH_SECRET: z.string().min(16).default("change-me-refresh-secret"),
+	JWT_ANON_SECRET: z.string().min(16).default("change-me-anon-secret"),
 	JWT_ACCESS_EXPIRES_IN: z.string().default("2d"),
 	JWT_REFRESH_EXPIRES_IN: z.string().default("30d"),
 	ROOM_CAPACITY_LIMIT: z.coerce.number().default(100),

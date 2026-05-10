@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { io, type Socket } from "socket.io-client";
 import { QRCodeSVG } from "qrcode.react";
@@ -8,26 +8,20 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/features/auth/use-auth";
 import { SHARE_BASE_URL, SOCKET_BASE_URL } from "@/lib/config";
 import { computeStats } from "@/features/room/stats";
-
-const DECK = ["1", "2", "3", "5", "8", "13", "21", "34", "55", "89", "?", "☕"];
-
-type Member = {
-	identityKey: string;
-	displayName: string;
-	isAuthenticated: boolean;
-	voted?: boolean;
-	vote?: string;
-};
+import { DECK } from "@/lib/deck";
+import type { Participant } from "@/features/room/types";
+import { tokenStore } from "@/lib/http";
 
 export function RoomPage() {
 	const { shortCode = "" } = useParams();
 	const { user, anonId, fingerprint } = useAuth();
 	const navigate = useNavigate();
 	const socketRef = useRef<Socket | null>(null);
-	const [members, setMembers] = useState<Member[]>([]);
+	const [members, setMembers] = useState<Participant[]>([]);
 	const [votesRevealed, setVotesRevealed] = useState(false);
 	const [votes, setVotes] = useState<Record<string, string>>({});
 	const [selected, setSelected] = useState<string | null>(null);
+	const [myIdentityKey, setMyIdentityKey] = useState<string>("");
 	const [status, setStatus] = useState<
 		"connected" | "reconnecting" | "disconnected"
 	>("disconnected");
@@ -36,61 +30,83 @@ export function RoomPage() {
 	const [shareUrl, setShareUrl] = useState("");
 	const [qrOpen, setQrOpen] = useState(false);
 
-	const identityKey = useMemo(() => {
-		const id = user?.id ?? anonId ?? "anon";
-		return `id:${id}|fp:${fingerprint}|ip:client`;
-	}, [user?.id, anonId, fingerprint]);
-
 	useEffect(() => {
 		setShareUrl(`${SHARE_BASE_URL}/room/${shortCode}`);
 	}, [shortCode]);
 
 	useEffect(() => {
+		const displayName =
+			user?.username ??
+			user?.email ??
+			`user_${(anonId ?? "anon").slice(0, 6)}`;
+
 		const socket = io(`${SOCKET_BASE_URL}/room`, {
 			transports: ["websocket"],
+			// Server builds the identity key from these + IP; never trust client-sent identityKey
+			auth: {
+				token: tokenStore.get() ?? undefined,
+				fingerprint,
+			},
 		});
 		socketRef.current = socket;
 
 		socket.on("connect", () => {
 			setStatus("connected");
-			socket.emit("room:join", {
-				shortCode,
-				identityKey,
-				displayName:
-					user?.username ??
-					user?.email ??
-					`user_${(anonId ?? "anon").slice(0, 6)}`,
-			});
+			socket.emit("room:join", { shortCode, displayName });
 		});
 
 		socket.on("disconnect", () => setStatus("disconnected"));
 		socket.on("reconnect_attempt", () => setStatus("reconnecting"));
 
-		socket.on("room:state_sync", ({ is_reconnect }) => {
-			if (is_reconnect) setStatus("connected");
-		});
+		socket.on(
+			"room:state_sync",
+			({
+				identityKey,
+				is_reconnect,
+				restored_vote,
+			}: {
+				identityKey: string;
+				is_reconnect: boolean;
+				restored_vote: string | null;
+			}) => {
+				setMyIdentityKey(identityKey);
+				if (is_reconnect) setStatus("connected");
+				if (restored_vote) setSelected(restored_vote);
+			},
+		);
 
-		socket.on("user:joined", ({ user_id, display_name }) => {
-			setMembers((prev) => {
-				if (prev.some((m) => m.identityKey === user_id)) return prev;
-				return [
-					...prev,
-					{
-						identityKey: user_id,
-						displayName: display_name,
-						isAuthenticated:
-							user_id.includes("id:") &&
-							!user_id.includes("anon"),
-					},
-				];
-			});
-		});
+		socket.on(
+			"user:joined",
+			({
+				user_id,
+				display_name,
+				is_authenticated,
+			}: {
+				user_id: string;
+				display_name: string;
+				is_authenticated: boolean;
+			}) => {
+				setMembers((prev) => {
+					if (prev.some((m) => m.identityKey === user_id))
+						return prev;
+					return [
+						...prev,
+						{
+							identityKey: user_id,
+							displayName: display_name,
+							isAuthenticated: is_authenticated,
+							voted: false,
+						},
+					];
+				});
+			},
+		);
 
-		socket.on("user:left", ({ user_id }) => {
+		socket.on("user:left", ({ user_id }: { user_id: string }) => {
 			setMembers((prev) => prev.filter((m) => m.identityKey !== user_id));
 		});
 
-		socket.on("user:voted", ({ user_id }) => {
+		socket.on("user:voted", ({ user_id }: { user_id: string }) => {
 			setMembers((prev) =>
 				prev.map((m) =>
 					m.identityKey === user_id ? { ...m, voted: true } : m,
@@ -98,13 +114,16 @@ export function RoomPage() {
 			);
 		});
 
-		socket.on("room:votes_revealed", ({ votes: incoming }) => {
-			setVotes(incoming);
-			setVotesRevealed(true);
-			setMembers((prev) =>
-				prev.map((m) => ({ ...m, vote: incoming[m.identityKey] })),
-			);
-		});
+		socket.on(
+			"room:votes_revealed",
+			({ votes: incoming }: { votes: Record<string, string> }) => {
+				setVotes(incoming);
+				setVotesRevealed(true);
+				setMembers((prev) =>
+					prev.map((m) => ({ ...m, vote: incoming[m.identityKey] })),
+				);
+			},
+		);
 
 		socket.on("room:votes_hidden", () => setVotesRevealed(false));
 		socket.on("room:reset", () => {
@@ -123,7 +142,7 @@ export function RoomPage() {
 		return () => {
 			socket.disconnect();
 		};
-	}, [shortCode, identityKey, user?.username, user?.email, anonId, navigate]);
+	}, [shortCode, fingerprint, user?.username, user?.email, anonId, navigate]);
 
 	const onVote = (value: string) => {
 		setSelected(value);
@@ -212,7 +231,12 @@ export function RoomPage() {
 							key={m.identityKey}
 							className="flex items-center justify-between rounded-md border p-2 text-sm">
 							<div className="flex items-center gap-2">
-								<span>{m.displayName}</span>
+								<span>
+									{m.displayName}
+									{m.identityKey === myIdentityKey
+										? " (you)"
+										: ""}
+								</span>
 								<Badge variant="outline">
 									{m.isAuthenticated ? "Auth" : "Anon"}
 								</Badge>
