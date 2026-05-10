@@ -21,6 +21,13 @@ RUN pnpm --filter @planning-poker/backend exec prisma generate \
  && pnpm --filter @planning-poker/backend build \
  && pnpm --filter=@planning-poker/backend --prod deploy /opt/app
 
+# pnpm 10's `pnpm deploy` strips the top-level `"type"` field from package.json
+# when assembling the publish-style bundle. The backend compiles to ESM
+# (`tsconfig.json` -> `"module": "NodeNext"`), so without `"type": "module"`
+# Node treats every `dist/*.js` as CommonJS and refuses named imports out of
+# CommonJS deps like `@prisma/client`. Put the field back.
+RUN node -e "const f=require('fs'),p='/opt/app/package.json',o=JSON.parse(f.readFileSync(p));o.type='module';f.writeFileSync(p,JSON.stringify(o,null,2));"
+
 FROM node:20-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /opt/app
