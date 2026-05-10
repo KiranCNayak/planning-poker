@@ -28,6 +28,12 @@ RUN pnpm --filter @planning-poker/backend exec prisma generate \
 # CommonJS deps like `@prisma/client`. Put the field back.
 RUN node -e "const f=require('fs'),p='/opt/app/package.json',o=JSON.parse(f.readFileSync(p));o.type='module';f.writeFileSync(p,JSON.stringify(o,null,2));"
 
+# `prisma generate` writes to node_modules/.prisma/client at workspace level,
+# which `pnpm deploy` does not copy. Run it again inside the deployed bundle
+# so node_modules/.prisma/client exists alongside @prisma/client (which is
+# just a shim that requires from .prisma/client/default).
+RUN cd /opt/app && node_modules/.bin/prisma generate
+
 FROM node:20-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /opt/app
