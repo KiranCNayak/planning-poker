@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/KiranCNayak/planning-poker/compare/v0.3.1...v0.3.2) (2026-05-10)
+
+
+### Bug Fixes
+
+* **infra:** regenerate prisma client after pnpm deploy so .prisma/client ships ([#19](https://github.com/KiranCNayak/planning-poker/issues/19)) ([8f4f941](https://github.com/KiranCNayak/planning-poker/commit/8f4f9417c768f476f5e0b4d2f71f7f2b6f98fb1d))
+
 ## [0.3.1](https://github.com/KiranCNayak/planning-poker/compare/v0.3.0...v0.3.1) (2026-05-10)
 
 
