@@ -7,11 +7,23 @@ import { apiFetch } from "@/lib/http";
 import { FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+const ROOM_COLORS = [
+	"#ef4444",
+	"#f97316",
+	"#eab308",
+	"#22c55e",
+	"#06b6d4",
+	"#3b82f6",
+	"#8b5cf6",
+	"#ec4899",
+];
+
 export function HomePage() {
 	const { user } = useAuth();
 	const navigate = useNavigate();
 	const [joinCode, setJoinCode] = useState("");
 	const [roomName, setRoomName] = useState("");
+	const [roomColor, setRoomColor] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
 
 	const createRoom = async (e: FormEvent) => {
@@ -20,7 +32,10 @@ export function HomePage() {
 		try {
 			const room = await apiFetch<{ shortCode: string }>("/api/rooms", {
 				method: "POST",
-				body: JSON.stringify({ name: roomName || undefined }),
+				body: JSON.stringify({
+					name: roomName || undefined,
+					color: roomColor ?? undefined,
+				}),
 			});
 			navigate(`/room/${room.shortCode}`);
 		} catch (err) {
@@ -84,6 +99,35 @@ export function HomePage() {
 									}
 									placeholder="Sprint Planning - Team A"
 								/>
+							</div>
+							<div className="space-y-2">
+								<Label>Accent Color (optional)</Label>
+								<div className="flex flex-wrap items-center gap-2">
+									{ROOM_COLORS.map((c) => (
+										<button
+											key={c}
+											type="button"
+											aria-label={`Use color ${c}`}
+											onClick={() =>
+												setRoomColor(
+													roomColor === c ? null : c,
+												)
+											}
+											className={`h-8 w-8 rounded-full border-2 transition ${
+												roomColor === c
+													? "border-foreground ring-2 ring-offset-2 ring-foreground/30"
+													: "border-transparent"
+											}`}
+											style={{ backgroundColor: c }}
+										/>
+									))}
+									<button
+										type="button"
+										onClick={() => setRoomColor(null)}
+										className="text-xs text-muted-foreground underline-offset-2 hover:underline">
+										Clear
+									</button>
+								</div>
 							</div>
 							{error ? (
 								<p className="text-sm text-destructive">

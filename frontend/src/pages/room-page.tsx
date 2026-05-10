@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAuth } from "@/features/auth/use-auth";
+import { apiFetch } from "@/lib/http";
 import { SHARE_BASE_URL, SOCKET_BASE_URL } from "@/lib/config";
 import { computeStats } from "@/features/room/stats";
 import { DECK } from "@/lib/deck";
@@ -29,9 +30,27 @@ export function RoomPage() {
 	const [copied, setCopied] = useState(false);
 	const [shareUrl, setShareUrl] = useState("");
 	const [qrOpen, setQrOpen] = useState(false);
+	const [roomName, setRoomName] = useState<string | null>(null);
+	const [roomColor, setRoomColor] = useState<string | null>(null);
 
 	useEffect(() => {
 		setShareUrl(`${SHARE_BASE_URL}/room/${shortCode}`);
+	}, [shortCode]);
+
+	useEffect(() => {
+		let cancelled = false;
+		apiFetch<{ name: string | null; color: string | null }>(
+			`/api/rooms/${shortCode}`,
+		)
+			.then((data) => {
+				if (cancelled) return;
+				setRoomName(data.name);
+				setRoomColor(data.color);
+			})
+			.catch(() => {});
+		return () => {
+			cancelled = true;
+		};
 	}, [shortCode]);
 
 	useEffect(() => {
@@ -222,10 +241,32 @@ export function RoomPage() {
 
 	return (
 		<div className="space-y-6">
-			<Card>
+			<Card
+				className="overflow-hidden"
+				style={
+					roomColor
+						? { borderTop: `4px solid ${roomColor}` }
+						: undefined
+				}>
 				<CardHeader>
 					<div className="flex flex-wrap items-center justify-between gap-3">
-						<CardTitle>Room {shortCode}</CardTitle>
+						<div className="flex items-center gap-3">
+							{roomColor ? (
+								<span
+									aria-hidden
+									className="h-6 w-6 shrink-0 rounded-full border"
+									style={{ backgroundColor: roomColor }}
+								/>
+							) : null}
+							<div className="flex flex-col">
+								<CardTitle>
+									{roomName ?? "Untitled Room"}
+								</CardTitle>
+								<span className="font-mono text-xs text-muted-foreground">
+									{shortCode}
+								</span>
+							</div>
+						</div>
 						<div className="flex items-center gap-2">
 							<Badge variant="outline">
 								{members.length} / {capacity}
@@ -243,141 +284,168 @@ export function RoomPage() {
 				</CardHeader>
 			</Card>
 
-			<Card>
-				<CardHeader>
-					<CardTitle>Share Room</CardTitle>
-				</CardHeader>
-				<CardContent className="flex flex-col items-center gap-4 md:flex-row md:justify-between">
-					<div className="space-y-2 text-sm">
-						<p className="text-muted-foreground">
-							Scan this QR code to open the room on mobile
-							instantly.
-						</p>
-						<p className="rounded-md border bg-muted px-3 py-2 font-mono text-xs">
-							{shareUrl}
-						</p>
+			<div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+				<div className="space-y-6">
+					<Card>
+						<CardHeader>
+							<CardTitle>Pick a Card</CardTitle>
+						</CardHeader>
+						<CardContent>
+							<div className="grid grid-cols-4 gap-2 md:grid-cols-6 lg:grid-cols-8">
+								{DECK.map((v) => (
+									<Button
+										key={v}
+										variant={
+											selected === v
+												? "default"
+												: "outline"
+										}
+										onClick={() => onVote(v)}>
+										{v}
+									</Button>
+								))}
+							</div>
+						</CardContent>
+					</Card>
+
+					<div className="flex flex-wrap gap-2">
+						<Button
+							onClick={() =>
+								socketRef.current?.emit("room:reveal")
+							}>
+							Reveal
+						</Button>
 						<Button
 							variant="outline"
-							size="sm"
-							onClick={copyShareUrl}>
-							{copied ? "Copied" : "Copy Link"}
+							onClick={() =>
+								socketRef.current?.emit("room:hide")
+							}>
+							Hide
+						</Button>
+						<Button
+							variant="outline"
+							onClick={() =>
+								socketRef.current?.emit("room:reset")
+							}>
+							Reset
 						</Button>
 					</div>
-					<div className="rounded-lg border bg-white p-3">
-						<button
-							type="button"
-							onClick={() => setQrOpen(true)}
-							className="cursor-zoom-in"
-							aria-label="Expand QR code">
-							<QRCodeSVG
-								value={shareUrl || shortCode}
-								size={144}
-							/>
-						</button>
-					</div>
-				</CardContent>
-			</Card>
 
-			<Card>
-				<CardHeader>
-					<CardTitle>Participants</CardTitle>
-				</CardHeader>
-				<CardContent className="space-y-2">
-					{members.length === 0 ? (
-						<p className="text-sm text-muted-foreground">
-							No participants yet.
-						</p>
+					<Card>
+						<CardHeader>
+							<CardTitle>Participants</CardTitle>
+						</CardHeader>
+						<CardContent className="space-y-2">
+							{members.length === 0 ? (
+								<p className="text-sm text-muted-foreground">
+									No participants yet.
+								</p>
+							) : null}
+							{members.map((m) => (
+								<div
+									key={m.identityKey}
+									className="flex items-center justify-between rounded-md border p-2 text-sm">
+									<div className="flex items-center gap-2">
+										<span>
+											{m.displayName}
+											{m.identityKey === myIdentityKey
+												? " (you)"
+												: ""}
+										</span>
+										<Badge variant="outline">
+											{m.isAuthenticated
+												? "Auth"
+												: "Anon"}
+										</Badge>
+									</div>
+									<span>
+										{votesRevealed
+											? (m.vote ?? "—")
+											: m.voted
+												? "Voted"
+												: "Waiting"}
+									</span>
+								</div>
+							))}
+						</CardContent>
+					</Card>
+
+					{votesRevealed ? (
+						<Card>
+							<CardHeader>
+								<CardTitle>Reveal Stats</CardTitle>
+							</CardHeader>
+							<CardContent className="grid gap-2 text-sm md:grid-cols-2">
+								<p>
+									<span className="font-medium">
+										Average:
+									</span>{" "}
+									{stats.average ?? "N/A"}
+								</p>
+								<p>
+									<span className="font-medium">Median:</span>{" "}
+									{stats.median ?? "N/A"}
+								</p>
+								<p>
+									<span className="font-medium">
+										Consensus:
+									</span>{" "}
+									{stats.consensus ? "Yes" : "No"}
+								</p>
+								<p>
+									<span className="font-medium">
+										`?` Count:
+									</span>{" "}
+									{stats.unknownCount}
+								</p>
+								<p>
+									<span className="font-medium">
+										`☕` Count:
+									</span>{" "}
+									{stats.coffeeCount}
+								</p>
+							</CardContent>
+						</Card>
 					) : null}
-					{members.map((m) => (
-						<div
-							key={m.identityKey}
-							className="flex items-center justify-between rounded-md border p-2 text-sm">
-							<div className="flex items-center gap-2">
-								<span>
-									{m.displayName}
-									{m.identityKey === myIdentityKey
-										? " (you)"
-										: ""}
-								</span>
-								<Badge variant="outline">
-									{m.isAuthenticated ? "Auth" : "Anon"}
-								</Badge>
+				</div>
+
+				<aside className="space-y-6 lg:sticky lg:top-6 lg:self-start">
+					<Card>
+						<CardHeader>
+							<CardTitle>Share Room</CardTitle>
+						</CardHeader>
+						<CardContent className="flex flex-col items-center gap-4">
+							<div className="rounded-lg border bg-white p-3">
+								<button
+									type="button"
+									onClick={() => setQrOpen(true)}
+									className="cursor-zoom-in"
+									aria-label="Expand QR code">
+									<QRCodeSVG
+										value={shareUrl || shortCode}
+										size={160}
+									/>
+								</button>
 							</div>
-							<span>
-								{votesRevealed
-									? (m.vote ?? "—")
-									: m.voted
-										? "Voted"
-										: "Waiting"}
-							</span>
-						</div>
-					))}
-				</CardContent>
-			</Card>
-
-			<Card>
-				<CardHeader>
-					<CardTitle>Pick a Card</CardTitle>
-				</CardHeader>
-				<CardContent>
-					<div className="grid grid-cols-4 gap-2 md:grid-cols-6 lg:grid-cols-12">
-						{DECK.map((v) => (
-							<Button
-								key={v}
-								variant={selected === v ? "default" : "outline"}
-								onClick={() => onVote(v)}>
-								{v}
-							</Button>
-						))}
-					</div>
-				</CardContent>
-			</Card>
-
-			<div className="flex flex-wrap gap-2">
-				<Button onClick={() => socketRef.current?.emit("room:reveal")}>
-					Reveal
-				</Button>
-				<Button
-					variant="outline"
-					onClick={() => socketRef.current?.emit("room:hide")}>
-					Hide
-				</Button>
-				<Button
-					variant="outline"
-					onClick={() => socketRef.current?.emit("room:reset")}>
-					Reset
-				</Button>
+							<div className="w-full space-y-2 text-sm">
+								<p className="text-muted-foreground">
+									Scan to open on mobile, or copy the link.
+								</p>
+								<p className="break-all rounded-md border bg-muted px-3 py-2 font-mono text-xs">
+									{shareUrl}
+								</p>
+								<Button
+									variant="outline"
+									size="sm"
+									className="w-full"
+									onClick={copyShareUrl}>
+									{copied ? "Copied" : "Copy Link"}
+								</Button>
+							</div>
+						</CardContent>
+					</Card>
+				</aside>
 			</div>
-
-			{votesRevealed ? (
-				<Card>
-					<CardHeader>
-						<CardTitle>Reveal Stats</CardTitle>
-					</CardHeader>
-					<CardContent className="grid gap-2 text-sm md:grid-cols-2">
-						<p>
-							<span className="font-medium">Average:</span>{" "}
-							{stats.average ?? "N/A"}
-						</p>
-						<p>
-							<span className="font-medium">Median:</span>{" "}
-							{stats.median ?? "N/A"}
-						</p>
-						<p>
-							<span className="font-medium">Consensus:</span>{" "}
-							{stats.consensus ? "Yes" : "No"}
-						</p>
-						<p>
-							<span className="font-medium">`?` Count:</span>{" "}
-							{stats.unknownCount}
-						</p>
-						<p>
-							<span className="font-medium">`☕` Count:</span>{" "}
-							{stats.coffeeCount}
-						</p>
-					</CardContent>
-				</Card>
-			) : null}
 
 			{qrOpen ? (
 				<div

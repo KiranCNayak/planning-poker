@@ -49,6 +49,7 @@ model Room {
   shortCode      String   @unique @map("short_code") @db.VarChar(36)
   ownerId        String   @map("owner_id") @db.Uuid
   name           String?  @db.VarChar(40)
+  color          String?  @db.VarChar(7)
   isActive       Boolean  @default(true) @map("is_active")
   capacity       Int      @default(100)
   votesRevealed  Boolean  @default(false) @map("votes_revealed")

@@ -11,6 +11,10 @@ import { env } from "../../config/env.js";
 
 const createRoomSchema = z.object({
 	name: z.string().min(1).max(40).optional(),
+	color: z
+		.string()
+		.regex(/^#[0-9a-fA-F]{6}$/, "must be a #RRGGBB hex color")
+		.optional(),
 });
 
 export const roomsRouter = Router();
@@ -33,6 +37,7 @@ roomsRouter.post(
 						ownerId,
 						shortCode: crypto.randomUUID(),
 						name: parsed.data.name,
+						color: parsed.data.color,
 						isActive: true,
 						capacity: env.ROOM_CAPACITY_LIMIT,
 					},
@@ -56,6 +61,8 @@ roomsRouter.post(
 		return res.status(201).json({
 			roomId: room.id,
 			shortCode: room.shortCode,
+			name: room.name,
+			color: room.color,
 			url: `/room/${room.shortCode}`,
 		});
 	}),
@@ -73,6 +80,7 @@ roomsRouter.get(
 			roomId: room.id,
 			shortCode: room.shortCode,
 			name: room.name,
+			color: room.color,
 			votesRevealed: room.votesRevealed,
 			capacity: room.capacity,
 		});
