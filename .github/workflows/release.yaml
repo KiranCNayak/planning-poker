@@ -14,13 +14,20 @@ permissions:
 
 env:
     REGISTRY: ghcr.io
-    IMAGE_PREFIX: ${{ github.repository_owner }}/planning-poker
 
 jobs:
     build-backend:
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
+
+            # GHCR rejects uppercase in repo names. github.repository_owner is
+            # preserved-case, so we lowercase once and reuse via $GITHUB_ENV.
+            - name: Compute lowercase image prefix
+              run: echo "IMAGE_PREFIX=${REGISTRY}/${OWNER,,}/planning-poker" >> "$GITHUB_ENV"
+              env:
+                  OWNER: ${{ github.repository_owner }}
+
             - uses: docker/setup-buildx-action@v3
             - uses: docker/login-action@v3
               with:
@@ -33,8 +40,8 @@ jobs:
                   file: backend/Dockerfile
                   push: true
                   tags: |
-                      ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-backend:${{ github.ref_name }}
-                      ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-backend:latest
+                      ${{ env.IMAGE_PREFIX }}-backend:${{ github.ref_name }}
+                      ${{ env.IMAGE_PREFIX }}-backend:latest
                   cache-from: type=gha
                   cache-to: type=gha,mode=max
 
@@ -42,6 +49,12 @@ jobs:
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
+
+            - name: Compute lowercase image prefix
+              run: echo "IMAGE_PREFIX=${REGISTRY}/${OWNER,,}/planning-poker" >> "$GITHUB_ENV"
+              env:
+                  OWNER: ${{ github.repository_owner }}
+
             - uses: docker/setup-buildx-action@v3
             - uses: docker/login-action@v3
               with:
@@ -58,8 +71,8 @@ jobs:
                       VITE_SOCKET_BASE_URL=https://planning-poker.knayak.dev
                       VITE_SHARE_BASE_URL=https://planning-poker.knayak.dev
                   tags: |
-                      ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-frontend:${{ github.ref_name }}
-                      ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-frontend:latest
+                      ${{ env.IMAGE_PREFIX }}-frontend:${{ github.ref_name }}
+                      ${{ env.IMAGE_PREFIX }}-frontend:latest
                   cache-from: type=gha
                   cache-to: type=gha,mode=max
 
@@ -71,6 +84,14 @@ jobs:
             url: https://${{ vars.DEPLOY_HOST }}
         steps:
             - uses: actions/checkout@v4
+
+            # Same lowercasing as the build jobs — the VPS compose file uses
+            # GH_OWNER to resolve ghcr.io/${GH_OWNER}/planning-poker-... at
+            # pull time, and docker insists on lowercase.
+            - name: Compute lowercase repo owner
+              run: echo "OWNER_LC=${OWNER,,}" >> "$GITHUB_ENV"
+              env:
+                  OWNER: ${{ github.repository_owner }}
 
             - name: Install sops
               run: |
@@ -87,7 +108,7 @@ jobs:
                   {
                       echo ""
                       echo "IMAGE_TAG=${{ github.ref_name }}"
-                      echo "GH_OWNER=${{ github.repository_owner }}"
+                      echo "GH_OWNER=${{ env.OWNER_LC }}"
                   } >> /tmp/.env
 
             - uses: webfactory/ssh-agent@v0.9.0
