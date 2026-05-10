@@ -13,6 +13,8 @@ type AuthContextValue = {
 	user: User | null;
 	anonId: string | null;
 	isLoading: boolean;
+	accessToken: string | null;
+	fpResolved: boolean;
 	login: (
 		email: string,
 		password: string,
@@ -35,6 +37,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 	const [anonId, setAnonId] = useState<string | null>(null);
 	const [isLoading, setIsLoading] = useState(true);
 	const [fingerprint, setFingerprint] = useState("unknown");
+	const [fpResolved, setFpResolved] = useState(false);
+	const [accessToken, setAccessToken] = useState<string | null>(null);
 
 	const refreshUser = async () => {
 		try {
@@ -53,6 +57,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 				setFingerprint(result.visitorId);
 			} catch {
 				setFingerprint("unknown");
+			} finally {
+				setFpResolved(true);
 			}
 
 			try {
@@ -71,6 +77,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 					{ method: "POST" },
 				);
 				tokenStore.set(refreshed.accessToken);
+				setAccessToken(refreshed.accessToken);
 				await refreshUser();
 			} catch {
 				setUser(null);
@@ -90,6 +97,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 			},
 		);
 		tokenStore.set(data.accessToken);
+		setAccessToken(data.accessToken);
 		setUser(data.user);
 	};
 
@@ -106,12 +114,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 			},
 		);
 		tokenStore.set(data.accessToken);
+		setAccessToken(data.accessToken);
 		setUser(data.user);
 	};
 
 	const logout = async () => {
 		await apiFetch("/api/auth/logout", { method: "POST" });
 		tokenStore.set(null);
+		setAccessToken(null);
 		setUser(null);
 	};
 
@@ -120,13 +130,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 			user,
 			anonId,
 			isLoading,
+			accessToken,
+			fpResolved,
 			login,
 			register,
 			logout,
 			refreshUser,
 			fingerprint,
 		}),
-		[user, anonId, isLoading, fingerprint],
+		[user, anonId, isLoading, accessToken, fpResolved, fingerprint],
 	);
 
 	return (

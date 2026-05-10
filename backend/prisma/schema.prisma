@@ -71,7 +71,8 @@ model RoomSession {
   identityKey String   @map("identity_key") @db.VarChar(255)
   userId      String?  @map("user_id") @db.Uuid
   displayName String   @map("display_name") @db.VarChar(50)
-  currentVote String?  @map("current_vote") @db.VarChar(5)
+  currentVote     String?  @map("current_vote") @db.VarChar(5)
+  isAuthenticated Boolean  @default(false) @map("is_authenticated")
   joinedAt    DateTime @default(now()) @map("joined_at") @db.Timestamptz(6)
   lastSeenAt  DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(6)
   leftAt      DateTime? @map("left_at") @db.Timestamptz(6)

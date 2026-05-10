@@ -137,14 +137,19 @@ export const initSocket = (httpServer: HttpServer) => {
 
 				// Reconnect detection must precede capacity check
 				const sessionKey = `session:${identityKey}:${room.id}`;
-				const [redisSession, existing] = await Promise.all([
-					redis.get(sessionKey),
-					prisma.roomSession.findFirst({
-						where: { roomId: room.id, identityKey },
-					}),
-				]);
+				const pendingKey = `pending_leave:${identityKey}:${room.id}`;
+				const [redisSession, pendingLeave, existing] =
+					await Promise.all([
+						redis.get(sessionKey),
+						redis.get(pendingKey),
+						prisma.roomSession.findFirst({
+							where: { roomId: room.id, identityKey },
+						}),
+					]);
 				const isReconnect =
-					!!redisSession || (!!existing && !existing.leftAt);
+					!!redisSession ||
+					!!pendingLeave ||
+					(!!existing && !existing.leftAt);
 
 				if (!isReconnect) {
 					const memberCount = await redis.scard(
@@ -159,6 +164,7 @@ export const initSocket = (httpServer: HttpServer) => {
 				const safeDisplayName =
 					(displayName as string | undefined)?.slice(0, 50) ?? "user";
 
+				const isAuthenticated = !!data().userId;
 				if (existing) {
 					await prisma.roomSession.update({
 						where: { id: existing.id },
@@ -166,6 +172,7 @@ export const initSocket = (httpServer: HttpServer) => {
 							leftAt: null,
 							lastSeenAt: new Date(),
 							displayName: safeDisplayName,
+							isAuthenticated,
 						},
 					});
 				} else {
@@ -174,6 +181,7 @@ export const initSocket = (httpServer: HttpServer) => {
 							roomId: room.id,
 							identityKey,
 							displayName: safeDisplayName,
+							isAuthenticated,
 							joinedAt: new Date(),
 							lastSeenAt: new Date(),
 						},
@@ -189,6 +197,11 @@ export const initSocket = (httpServer: HttpServer) => {
 					},
 				});
 
+				// Cancel grace-window pending leave if reconnecting within it
+				if (pendingLeave) {
+					await redis.del(pendingKey);
+				}
+
 				// Redis: add to members set and start heartbeat
 				await Promise.all([
 					redis.sadd(`room:${room.id}:members`, identityKey),
@@ -196,24 +209,49 @@ export const initSocket = (httpServer: HttpServer) => {
 				]);
 
 				// Restore vote from Redis if reconnecting
-				const restoredVote = isReconnect
-					? await redis.hget(`room:${room.id}:votes`, identityKey)
-					: null;
+				const [restoredVote, liveSessions] = await Promise.all([
+					isReconnect
+						? redis.hget(`room:${room.id}:votes`, identityKey)
+						: Promise.resolve(null),
+					prisma.roomSession.findMany({
+						where: { roomId: room.id, leftAt: null },
+						select: {
+							identityKey: true,
+							displayName: true,
+							isAuthenticated: true,
+							currentVote: true,
+						},
+					}),
+				]);
 
 				socket.join(room.id);
 				(socket.data as SocketData).roomId = room.id;
 				(socket.data as SocketData).displayName = safeDisplayName;
 
-				nsp.to(room.id).emit("user:joined", {
-					user_id: identityKey,
-					display_name: safeDisplayName,
-					is_authenticated: !!data().userId,
-				});
+				if (isReconnect) {
+					// Notify peers without changing their member count perception
+					nsp.to(room.id).except(socket.id).emit("user:reconnected", {
+						user_id: identityKey,
+						display_name: safeDisplayName,
+					});
+				} else {
+					nsp.to(room.id).emit("user:joined", {
+						user_id: identityKey,
+						display_name: safeDisplayName,
+						is_authenticated: !!data().userId,
+					});
+				}
 				socket.emit("room:state_sync", {
 					roomId: room.id,
 					identityKey,
 					is_reconnect: isReconnect,
 					restored_vote: restoredVote ?? null,
+					members: liveSessions.map((s) => ({
+						identity_key: s.identityKey,
+						display_name: s.displayName,
+						is_authenticated: s.isAuthenticated,
+						voted: s.currentVote !== null,
+					})),
 				});
 			} catch (err) {
 				console.error("room:join error", err);
@@ -336,6 +374,14 @@ export const initSocket = (httpServer: HttpServer) => {
 						targetIdentityKey,
 				);
 				if (target) {
+					// Set flag before disconnect so the disconnect handler skips
+					// writing a pending_leave for this identity.
+					await redis.set(
+						`kicked:${targetIdentityKey}:${roomId}`,
+						"1",
+						"EX",
+						5,
+					);
 					target.emit("room:kicked");
 					target.disconnect();
 				}
@@ -350,6 +396,7 @@ export const initSocket = (httpServer: HttpServer) => {
 						data: { leftAt: new Date() },
 					}),
 					redis.srem(`room:${roomId}:members`, targetIdentityKey),
+					redis.del(`pending_leave:${targetIdentityKey}:${roomId}`),
 				]);
 
 				nsp.to(roomId).emit("user:left", {
@@ -397,6 +444,12 @@ export const initSocket = (httpServer: HttpServer) => {
 						targetIdentityKey,
 				);
 				if (target) {
+					await redis.set(
+						`kicked:${targetIdentityKey}:${roomId}`,
+						"1",
+						"EX",
+						5,
+					);
 					target.emit("room:banned", {
 						reason: (reason as string | undefined) ?? null,
 						expires_at: expiresAt,
@@ -414,6 +467,7 @@ export const initSocket = (httpServer: HttpServer) => {
 						data: { leftAt: new Date() },
 					}),
 					redis.srem(`room:${roomId}:members`, targetIdentityKey),
+					redis.del(`pending_leave:${targetIdentityKey}:${roomId}`),
 				]);
 
 				nsp.to(roomId).emit("user:left", {
@@ -429,31 +483,33 @@ export const initSocket = (httpServer: HttpServer) => {
 				const { roomId, identityKey, displayName } = data();
 				if (!roomId) return;
 
-				await Promise.all([
-					prisma.roomSession
-						.updateMany({
-							where: { roomId, identityKey, leftAt: null },
-							data: {
-								leftAt: new Date(),
-								lastSeenAt: new Date(),
-							},
-						})
-						.catch(() => undefined),
-					prisma.roomParticipantHistory
-						.create({
-							data: {
-								roomId,
-								identityKey,
-								displayName: displayName ?? "user",
-								eventType: "leave",
-							},
-						})
-						.catch(() => undefined),
-					redis.srem(`room:${roomId}:members`, identityKey),
-					redis.del(`session:${identityKey}:${roomId}`),
-				]);
+				// If the server kicked/banned this socket it already finalized the
+				// session; skip creating a pending_leave that the sweeper would
+				// double-finalize.
+				const kickedKey = `kicked:${identityKey}:${roomId}`;
+				const wasKicked = await redis.get(kickedKey);
+				if (wasKicked) {
+					await redis.del(kickedKey);
+					return;
+				}
 
-				nsp.to(roomId).emit("user:left", { user_id: identityKey });
+				// Enter 60s grace window instead of immediately cleaning up.
+				// The sweeper finalizes leftAt + user:left after the TTL expires.
+				// On reconnect within the window, room:join cancels the pending key.
+				const pendingKey = `pending_leave:${identityKey}:${roomId}`;
+				await redis.set(
+					pendingKey,
+					JSON.stringify({
+						disconnectedAt: Date.now(),
+						displayName: displayName ?? "user",
+					}),
+					"EX",
+					60,
+				);
+
+				nsp.to(roomId).emit("user:disconnected", {
+					user_id: identityKey,
+				});
 			} catch (err) {
 				console.error("disconnect error", err);
 			}

@@ -10,11 +10,11 @@ import { SHARE_BASE_URL, SOCKET_BASE_URL } from "@/lib/config";
 import { computeStats } from "@/features/room/stats";
 import { DECK } from "@/lib/deck";
 import type { Participant } from "@/features/room/types";
-import { tokenStore } from "@/lib/http";
 
 export function RoomPage() {
 	const { shortCode = "" } = useParams();
-	const { user, anonId, fingerprint } = useAuth();
+	const { user, anonId, fingerprint, isLoading, fpResolved, accessToken } =
+		useAuth();
 	const navigate = useNavigate();
 	const socketRef = useRef<Socket | null>(null);
 	const [members, setMembers] = useState<Participant[]>([]);
@@ -23,8 +23,8 @@ export function RoomPage() {
 	const [selected, setSelected] = useState<string | null>(null);
 	const [myIdentityKey, setMyIdentityKey] = useState<string>("");
 	const [status, setStatus] = useState<
-		"connected" | "reconnecting" | "disconnected"
-	>("disconnected");
+		"connecting" | "connected" | "reconnecting" | "disconnected"
+	>("connecting");
 	const [capacity] = useState(100);
 	const [copied, setCopied] = useState(false);
 	const [shareUrl, setShareUrl] = useState("");
@@ -35,6 +35,14 @@ export function RoomPage() {
 	}, [shortCode]);
 
 	useEffect(() => {
+		// Wait until fingerprint and anon identity have stabilised to avoid
+		// opening a connection with an "unknown" fingerprint, which would produce
+		// a different identity key than the one used on subsequent renders.
+		if (isLoading || !fpResolved) {
+			setStatus("connecting");
+			return;
+		}
+
 		const displayName =
 			user?.username ??
 			user?.email ??
@@ -44,7 +52,7 @@ export function RoomPage() {
 			transports: ["websocket"],
 			// Server builds the identity key from these + IP; never trust client-sent identityKey
 			auth: {
-				token: tokenStore.get() ?? undefined,
+				token: accessToken ?? undefined,
 				fingerprint,
 			},
 		});
@@ -64,14 +72,31 @@ export function RoomPage() {
 				identityKey,
 				is_reconnect,
 				restored_vote,
+				members: snapshot,
 			}: {
 				identityKey: string;
 				is_reconnect: boolean;
 				restored_vote: string | null;
+				members: Array<{
+					identity_key: string;
+					display_name: string;
+					is_authenticated: boolean;
+					voted: boolean;
+				}>;
 			}) => {
 				setMyIdentityKey(identityKey);
 				if (is_reconnect) setStatus("connected");
 				if (restored_vote) setSelected(restored_vote);
+				if (snapshot) {
+					setMembers(
+						snapshot.map((m) => ({
+							identityKey: m.identity_key,
+							displayName: m.display_name,
+							isAuthenticated: m.is_authenticated,
+							voted: m.voted,
+						})),
+					);
+				}
 			},
 		);
 
@@ -104,6 +129,35 @@ export function RoomPage() {
 
 		socket.on("user:left", ({ user_id }: { user_id: string }) => {
 			setMembers((prev) => prev.filter((m) => m.identityKey !== user_id));
+		});
+
+		socket.on(
+			"user:reconnected",
+			({
+				user_id,
+				display_name,
+			}: {
+				user_id: string;
+				display_name: string;
+			}) => {
+				setMembers((prev) => {
+					if (prev.some((m) => m.identityKey === user_id))
+						return prev;
+					return [
+						...prev,
+						{
+							identityKey: user_id,
+							displayName: display_name,
+							isAuthenticated: false,
+							voted: false,
+						},
+					];
+				});
+			},
+		);
+
+		socket.on("user:disconnected", () => {
+			// Peer is in 60s grace window; keep them in the list until user:left fires
 		});
 
 		socket.on("user:voted", ({ user_id }: { user_id: string }) => {
@@ -142,7 +196,15 @@ export function RoomPage() {
 		return () => {
 			socket.disconnect();
 		};
-	}, [shortCode, fingerprint, user?.username, user?.email, anonId, navigate]);
+	}, [
+		shortCode,
+		isLoading,
+		fpResolved,
+		fingerprint,
+		anonId,
+		accessToken,
+		navigate,
+	]);
 
 	const onVote = (value: string) => {
 		setSelected(value);
