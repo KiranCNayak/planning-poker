@@ -8,3 +8,15 @@ frontend/dist/
 coverage/
 .DS_Store
 *.tsbuildinfo
+
+# Terraform: never commit state, plans, or per-developer tfvars. Provider
+# plugins and the lock file's transient cache live under .terraform/. The
+# .terraform.lock.hcl IS committed (pins provider versions across machines).
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+**/terraform.tfvars
+!**/terraform.tfvars.example
+crash.log
+crash.*.log

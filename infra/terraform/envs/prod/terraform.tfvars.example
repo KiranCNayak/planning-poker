@@ -1,0 +1,9 @@
+# Copy to terraform.tfvars and fill in. The .tfvars file IS gitignored.
+#
+# Public SSH key for the deploy user. Generate with:
+#   ssh-keygen -t ed25519 -f ~/.ssh/planning_poker_deploy -C "planning-poker-deploy"
+# then paste the contents of ~/.ssh/planning_poker_deploy.pub below.
+ssh_public_key = "ssh-ed25519 AAAA... planning-poker-deploy"
+
+# Optional: tighten SSH to your home/office IPs once everything works.
+# ssh_allowed_cidrs = ["203.0.113.42/32"]
