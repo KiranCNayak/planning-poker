@@ -2,6 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../../lib/prisma.js";
 import { asyncHandler } from "../../lib/asyncHandler.js";
+import { env } from "../../config/env.js";
 import { loginUser, registerUser } from "./service.js";
 import {
 	signAccessToken,
@@ -11,10 +12,20 @@ import {
 	verifyRefreshToken,
 } from "./tokens.js";
 
+// Cookies emitted by auth flows. `secure` flips on in production so the
+// browser refuses to send them over plaintext HTTP behind the prod gateway.
+const cookieDefaults = {
+	httpOnly: true,
+	sameSite: "lax" as const,
+	secure: env.NODE_ENV === "production",
+	path: "/",
+};
+
 const registerSchema = z.object({
 	email: z.string().email(),
 	password: z.string().min(8),
 	anonId: z.string().uuid().optional(),
+	inviteCode: z.string().optional(),
 });
 const loginSchema = z.object({
 	email: z.string().email(),
@@ -37,12 +48,7 @@ authRouter.post(
 		}
 		const anonId = crypto.randomUUID();
 		const anonToken = signAnonToken(anonId);
-		res.cookie("anon_token", anonToken, {
-			httpOnly: true,
-			sameSite: "lax",
-			secure: false,
-			path: "/",
-		});
+		res.cookie("anon_token", anonToken, cookieDefaults);
 		return res.json({ anonId });
 	}),
 );
@@ -53,6 +59,10 @@ authRouter.post(
 		const parsed = registerSchema.safeParse(req.body);
 		if (!parsed.success)
 			return res.status(400).json({ error: "BAD_REQUEST" });
+
+		if (env.INVITE_CODE && parsed.data.inviteCode !== env.INVITE_CODE) {
+			return res.status(403).json({ error: "INVALID_INVITE_CODE" });
+		}
 
 		let user;
 		try {
@@ -75,12 +85,7 @@ authRouter.post(
 
 		const access = signAccessToken(user.id);
 		const refresh = signRefreshToken(user.id);
-		res.cookie("refresh_token", refresh, {
-			httpOnly: true,
-			sameSite: "lax",
-			secure: false,
-			path: "/",
-		});
+		res.cookie("refresh_token", refresh, cookieDefaults);
 		return res.json({
 			accessToken: access,
 			user: { id: user.id, email: user.email, username: user.username },
@@ -101,12 +106,7 @@ authRouter.post(
 
 		const access = signAccessToken(user.id);
 		const refresh = signRefreshToken(user.id);
-		res.cookie("refresh_token", refresh, {
-			httpOnly: true,
-			sameSite: "lax",
-			secure: false,
-			path: "/",
-		});
+		res.cookie("refresh_token", refresh, cookieDefaults);
 		return res.json({
 			accessToken: access,
 			user: { id: user.id, email: user.email, username: user.username },
@@ -134,17 +134,12 @@ authRouter.post(
 
 		const access = signAccessToken(user.id);
 		const refresh = signRefreshToken(user.id);
-		res.cookie("refresh_token", refresh, {
-			httpOnly: true,
-			sameSite: "lax",
-			secure: false,
-			path: "/",
-		});
+		res.cookie("refresh_token", refresh, cookieDefaults);
 		return res.json({ accessToken: access });
 	}),
 );
 
 authRouter.post("/logout", (_req, res) => {
-	res.clearCookie("refresh_token", { path: "/" });
+	res.clearCookie("refresh_token", { path: cookieDefaults.path });
 	return res.status(204).send();
 });

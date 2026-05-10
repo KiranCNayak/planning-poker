@@ -1,0 +1,28 @@
+# Caddy auto-issues and renews a Let's Encrypt cert for ${DOMAIN}.
+# The Cloudflare DNS record for this host is set to "DNS only" (proxy off),
+# so Caddy sees real client IPs and owns the TLS handshake.
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# REST API
+	handle /api/* {
+		reverse_proxy backend:4000
+	}
+
+	# Socket.IO (HTTP long-poll + WebSocket upgrade)
+	handle /socket.io/* {
+		reverse_proxy backend:4000
+	}
+
+	# Backend health probe; useful for uptime checks but not load-bearing.
+	handle /health {
+		reverse_proxy backend:4000
+	}
+
+	# SPA — everything else falls through to the frontend nginx, which serves
+	# /index.html for unknown paths so React Router can resolve them.
+	handle {
+		reverse_proxy frontend:80
+	}
+}

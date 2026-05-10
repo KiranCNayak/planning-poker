@@ -1,0 +1,12 @@
+**/node_modules
+**/dist
+**/coverage
+**/.env
+**/.env.*
+!**/.env.example
+**/*.log
+**/*.tsbuildinfo
+.git
+.github
+.husky
+.DS_Store

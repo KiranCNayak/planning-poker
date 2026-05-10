@@ -103,7 +103,7 @@ Backend runs on port 4000; frontend on 5173. The frontend proxies all `/api` cal
 - `lib/identity.ts` — `buildIdentityKey(primaryId, fp, ip)` builds the canonical `id:|fp:|ip:` key from primitives. `buildIdentityKeyFromRequest(req, primaryId)` is the HTTP-route convenience wrapper (relies on Express's `trust proxy` setting so `req.ip` resolves the real client IP from `X-Forwarded-For`). `resolveClientIp(socketAddress, xffHeader, trustProxy)` is the Socket.IO equivalent — it mirrors Express semantics by walking `[...XFF, socket.handshake.address]` and skipping `TRUST_PROXY` trusted hops from the right. The socket middleware in `realtime/socket.ts` uses this so identity keys remain stable behind an API gateway. The client never supplies its own identity key.
 - `lib/prisma.ts` / `lib/redis.ts` — singleton clients.
 - `lib/asyncHandler.ts` — wraps async Express route handlers so rejected promises propagate to `next(err)`. All route files use it. A global error middleware in app.ts catches anything that reaches it and returns `{ error: "INTERNAL_ERROR" }`.
-- `modules/auth/` — local registration/login (bcrypt), JWT signing/verification (access 2d, refresh 30d), anonymous bootstrap endpoint.
+- `modules/auth/` — local registration/login (bcrypt), JWT signing/verification (access 2d, refresh 30d), anonymous bootstrap endpoint. When `INVITE_CODE` is set, `/api/auth/register` requires a matching `inviteCode` body field; empty disables the check (the dev default). Cookies emitted by every auth route share a `cookieDefaults` object whose `secure` flag flips on under `NODE_ENV=production`.
 - `modules/rooms/` — REST: POST (auth-only create), GET (metadata), DELETE (owner-only deactivate).
 - `modules/bans/` — REST: owner applies/views/lifts room bans.
 - `modules/users/` — REST: `GET /api/users/me`, username claim.
@@ -137,6 +137,17 @@ A dev nginx gateway lives at `infra/nginx/nginx.conf`. It's wired into `docker-c
 - **Critical contract**: the gateway must overwrite `X-Forwarded-For` on ingress (`proxy_set_header X-Forwarded-For $remote_addr;`, never `$proxy_add_x_forwarded_for`). It must also forward `X-Forwarded-Proto` so cookies marked `Secure` are emitted under HTTPS.
 
 See §14 of `planning-poker-technical-spec.md` for the full design.
+
+### Production deployment
+
+The prod stack (`infra/deploy/`) runs on a single Hetzner VPS in front of Neon Postgres + Upstash Redis at `https://planning-poker.knayak.dev`. It is not the same as the dev nginx gateway above.
+
+- **Caddy** (`infra/deploy/Caddyfile`) terminates TLS via Let's Encrypt and reverse-proxies `/api/*`, `/socket.io/*`, and `/health` to the backend, everything else to the frontend.
+- **Backend image** (`backend/Dockerfile`) is multi-stage: pnpm install → `prisma generate` → `tsc` → `pnpm deploy --prod` into `/opt/app`. `prisma` is a runtime dep so the same image powers the migration container.
+- **Frontend image** (`frontend/Dockerfile`) is multi-stage: pnpm install → `vite build` (with `VITE_*` baked in via build args) → static dist served by `nginx:1.27-alpine`.
+- **`infra/deploy/docker-compose.prod.yaml`** runs four services: `caddy`, `backend`, `frontend`, and a one-shot `migrator` (`prisma migrate deploy`) that backend `depends_on` via `service_completed_successfully`.
+- **Secrets** come from a `.env` file colocated with the compose file on the VPS (template in `infra/deploy/.env.example`). In a later PR this file will be SOPS-encrypted in-repo and decrypted at deploy time.
+- The build context for both Dockerfiles is the repo root (so `pnpm-lock.yaml`, `pnpm-workspace.yaml`, and `.npmrc` are reachable). `.npmrc` carries `inject-workspace-packages=true`, required by `pnpm deploy` under pnpm 10+.
 
 ### Data model highlights
 

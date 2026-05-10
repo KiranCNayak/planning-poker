@@ -23,6 +23,7 @@ type AuthContextValue = {
 	register: (
 		email: string,
 		password: string,
+		inviteCode?: string,
 		redirectTo?: string,
 	) => Promise<void>;
 	logout: () => Promise<void>;
@@ -101,7 +102,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 		setUser(data.user);
 	};
 
-	const register = async (email: string, password: string) => {
+	const register = async (
+		email: string,
+		password: string,
+		inviteCode?: string,
+	) => {
 		const data = await apiFetch<{ accessToken: string; user: User }>(
 			"/api/auth/register",
 			{
@@ -110,6 +115,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 					email,
 					password,
 					anonId: anonId ?? undefined,
+					inviteCode: inviteCode || undefined,
 				}),
 			},
 		);

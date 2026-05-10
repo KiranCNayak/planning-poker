@@ -12,6 +12,7 @@ export function RegisterPage() {
 	const location = useLocation();
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
+	const [inviteCode, setInviteCode] = useState("");
 	const [error, setError] = useState<string | null>(null);
 
 	const redirectTo =
@@ -21,7 +22,7 @@ export function RegisterPage() {
 		e.preventDefault();
 		setError(null);
 		try {
-			await register(email, password, redirectTo);
+			await register(email, password, inviteCode, redirectTo);
 			navigate(redirectTo, { replace: true });
 		} catch (err) {
 			setError((err as Error).message);
@@ -50,6 +51,14 @@ export function RegisterPage() {
 							type="password"
 							value={password}
 							onChange={(e) => setPassword(e.target.value)}
+						/>
+					</div>
+					<div className="space-y-2">
+						<Label>Invite code</Label>
+						<Input
+							value={inviteCode}
+							onChange={(e) => setInviteCode(e.target.value)}
+							placeholder="Required in production"
 						/>
 					</div>
 					{error ? (
