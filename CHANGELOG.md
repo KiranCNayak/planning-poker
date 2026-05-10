@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/KiranCNayak/planning-poker/compare/v0.2.1...v0.2.2) (2026-05-10)
+
+
+### Bug Fixes
+
+* **ci:** lowercase repo owner in GHCR image tags ([#10](https://github.com/KiranCNayak/planning-poker/issues/10)) ([114f171](https://github.com/KiranCNayak/planning-poker/commit/114f17116fdd47a094f50fa42d243f7ed98dd976))
+
 ## [0.2.1](https://github.com/KiranCNayak/planning-poker/compare/v0.2.0...v0.2.1) (2026-05-10)
 
 
