@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/KiranCNayak/planning-poker/compare/v0.2.3...v0.3.0) (2026-05-10)
+
+
+### Features
+
+* **frontend:** show release version in app footer ([#16](https://github.com/KiranCNayak/planning-poker/issues/16)) ([656ae96](https://github.com/KiranCNayak/planning-poker/commit/656ae968485002602990ea618a101fc144c2cbdb))
+
+
+### Bug Fixes
+
+* **infra:** restore "type": "module" stripped by pnpm deploy ([#14](https://github.com/KiranCNayak/planning-poker/issues/14)) ([7805c50](https://github.com/KiranCNayak/planning-poker/commit/7805c5047a14337e495e61fb670edee750a3d137))
+
 ## [0.2.3](https://github.com/KiranCNayak/planning-poker/compare/v0.2.2...v0.2.3) (2026-05-10)
 
 
