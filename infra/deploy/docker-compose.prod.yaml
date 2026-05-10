@@ -1,0 +1,62 @@
+# Production stack run on the VPS.
+#
+# Layout:
+#   caddy     → terminates TLS for ${DOMAIN}, reverse-proxies to backend/frontend
+#   backend   → Express + Socket.IO, depends on a successful one-shot migration
+#   frontend  → static SPA bundle served by nginx
+#   migrator  → runs `prisma migrate deploy` once on every deploy, then exits
+#
+# Secrets and image versioning come from a `.env` file colocated with this
+# compose file on the VPS. Required variables: IMAGE_TAG, GH_OWNER, DOMAIN,
+# plus the backend env vars enumerated in backend/.env.example.
+
+services:
+    caddy:
+        image: caddy:2.8-alpine
+        restart: unless-stopped
+        ports:
+            - "80:80"
+            - "443:443"
+        environment:
+            DOMAIN: ${DOMAIN}
+        volumes:
+            - ./Caddyfile:/etc/caddy/Caddyfile:ro
+            - caddy_data:/data
+            - caddy_config:/config
+        depends_on:
+            - backend
+            - frontend
+
+    backend:
+        image: ghcr.io/${GH_OWNER}/planning-poker-backend:${IMAGE_TAG}
+        restart: unless-stopped
+        env_file:
+            - .env
+        environment:
+            NODE_ENV: production
+            PORT: "4000"
+            TRUST_PROXY: "1"
+        depends_on:
+            migrator:
+                condition: service_completed_successfully
+        expose:
+            - "4000"
+
+    frontend:
+        image: ghcr.io/${GH_OWNER}/planning-poker-frontend:${IMAGE_TAG}
+        restart: unless-stopped
+        expose:
+            - "80"
+
+    migrator:
+        image: ghcr.io/${GH_OWNER}/planning-poker-backend:${IMAGE_TAG}
+        env_file:
+            - .env
+        environment:
+            NODE_ENV: production
+        command: ["node_modules/.bin/prisma", "migrate", "deploy"]
+        restart: "no"
+
+volumes:
+    caddy_data:
+    caddy_config:
