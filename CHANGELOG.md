@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/KiranCNayak/planning-poker/compare/v0.2.0...v0.2.1) (2026-05-10)
+
+
+### Bug Fixes
+
+* **ci:** use PAT for release-please so tag pushes trigger release.yaml ([#8](https://github.com/KiranCNayak/planning-poker/issues/8)) ([0c97d1a](https://github.com/KiranCNayak/planning-poker/commit/0c97d1a1cdc94a099c74ed10ec126220abcfc601))
+
 ## [0.2.0](https://github.com/KiranCNayak/planning-poker/compare/v0.1.0...v0.2.0) (2026-05-10)
 
 
