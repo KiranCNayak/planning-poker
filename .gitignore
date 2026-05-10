@@ -9,6 +9,11 @@ coverage/
 .DS_Store
 *.tsbuildinfo
 
+# SOPS: only the *.enc.yaml encrypted form may be committed under
+# infra/secrets/. Any plaintext .yaml left there would be a leak.
+infra/secrets/*.yaml
+!infra/secrets/*.enc.yaml
+
 # Terraform: never commit state, plans, or per-developer tfvars. Provider
 # plugins and the lock file's transient cache live under .terraform/. The
 # .terraform.lock.hcl IS committed (pins provider versions across machines).

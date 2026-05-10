@@ -1,0 +1,12 @@
+# SOPS configuration. Files matching the path regex below are encrypted to
+# the listed age recipients. Adding a new collaborator or a CI key is a
+# matter of appending another `age:` entry and running `sops updatekeys`
+# on each affected file.
+#
+# Default behavior: SOPS encrypts only the leaf values in YAML; keys stay
+# in plaintext so diffs remain reviewable.
+
+creation_rules:
+    - path_regex: infra/secrets/.*\.enc\.yaml$
+      age:
+          - age1kjspspx3q6saucd6y69yezh0hkjq5rzvfthe227zp5gpvprrlvnqdan684
