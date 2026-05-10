@@ -62,6 +62,25 @@ cd backend && pnpm build     # tsc output → backend/dist/
 cd frontend && pnpm build    # vite build → frontend/dist/
 ```
 
+## Commit messages
+
+This repo follows the [Conventional Commits](https://www.conventionalcommits.org/) spec, enforced by a `commit-msg` hook (commitlint + `@commitlint/config-conventional`). Release tooling (release-please) parses these to produce the changelog and bump versions.
+
+Format: `<type>(optional scope): <description>`
+
+Allowed types: `feat`, `fix`, `chore`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `revert`. A `!` after the type or a `BREAKING CHANGE:` footer denotes a breaking change.
+
+Examples:
+
+```
+feat(rooms): add capacity check before join
+fix(auth): reject anonymous bootstrap when fingerprint missing
+chore(deps): bump prisma to 5.20
+refactor(realtime)!: rename room:join payload field
+```
+
+The hook runs on every commit. To bypass it locally use `git commit --no-verify`, but never push commits that would fail the convention — release-please ignores them.
+
 ## Architecture
 
 ### Monorepo layout
