@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/KiranCNayak/planning-poker/compare/v0.3.0...v0.3.1) (2026-05-10)
+
+
+### Bug Fixes
+
+* **backend:** default-import @prisma/client so ESM loader accepts it ([#17](https://github.com/KiranCNayak/planning-poker/issues/17)) ([e705692](https://github.com/KiranCNayak/planning-poker/commit/e705692697ed42e11e558f4f8e221c88ebd25f61))
+
 ## [0.3.0](https://github.com/KiranCNayak/planning-poker/compare/v0.2.3...v0.3.0) (2026-05-10)
 
 
