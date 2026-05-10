@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.3](https://github.com/KiranCNayak/planning-poker/compare/v0.2.2...v0.2.3) (2026-05-10)
+
+
+### Bug Fixes
+
+* **infra:** chown node_modules to node user in backend runtime image ([#12](https://github.com/KiranCNayak/planning-poker/issues/12)) ([a831ac0](https://github.com/KiranCNayak/planning-poker/commit/a831ac063238a70dbc43b628591537aac772bfc2))
+
 ## [0.2.2](https://github.com/KiranCNayak/planning-poker/compare/v0.2.1...v0.2.2) (2026-05-10)
 
 
