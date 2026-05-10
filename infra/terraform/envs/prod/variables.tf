@@ -10,12 +10,12 @@ variable "cloudflare_zone_name" {
 
 variable "hetzner_location" {
   type    = string
-  default = "sin"
+  default = "hel1"
 }
 
 variable "hetzner_server_type" {
   type    = string
-  default = "cpx21"
+  default = "cpx22"
 }
 
 variable "ssh_public_key" {

@@ -1,16 +1,20 @@
 {
-	"permissions": {
-		"allow": [
-			"Bash(pnpm build *)",
-			"Bash(pnpm install *)",
-			"Bash(pnpm test *)",
-			"Bash(pnpm prisma *)",
-			"Bash(pnpm lint *)",
-			"Bash(pnpm format:check)",
-			"Bash(pnpm format *)",
-			"Bash(docker run *)",
-			"Bash(docker compose *)",
-			"Bash(make help *)"
-		]
-	}
+  "permissions": {
+    "allow": [
+      "Bash(pnpm build *)",
+      "Bash(pnpm install *)",
+      "Bash(pnpm test *)",
+      "Bash(pnpm prisma *)",
+      "Bash(pnpm lint *)",
+      "Bash(pnpm format:check)",
+      "Bash(pnpm format *)",
+      "Bash(docker run *)",
+      "Bash(docker compose *)",
+      "Bash(make help *)",
+      "Bash(brew install *)",
+      "Bash(actionlint .github/workflows/*.yaml)",
+      "Bash(git add *)",
+      "Bash(sort -k1)"
+    ]
+  }
 }

@@ -5,5 +5,7 @@
 # then paste the contents of ~/.ssh/planning_poker_deploy.pub below.
 ssh_public_key = "ssh-ed25519 AAAA... planning-poker-deploy"
 
-# Optional: tighten SSH to your home/office IPs once everything works.
-# ssh_allowed_cidrs = ["203.0.113.42/32"]
+# Optional overrides — defaults live in variables.tf (hel1 + cpx22 for prod).
+# hetzner_location    = "hel1"
+# hetzner_server_type = "cpx22"
+# ssh_allowed_cidrs   = ["203.0.113.42/32"]   # tighten SSH to your IPs
