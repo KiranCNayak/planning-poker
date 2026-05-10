@@ -21,8 +21,8 @@ variable "hetzner_location" {
 
 variable "hetzner_server_type" {
   type        = string
-  description = "Hetzner server type. CPX21 = 3 vCPU / 4 GB / 80 GB."
-  default     = "cpx21"
+  description = "Hetzner server type. CPX22 = 2 vCPU / 4 GB / 80 GB. Hetzner has phased out CPX21/CPX31/etc. for new orders in favour of the renamed CPX22/CPX32 series."
+  default     = "cpx22"
 }
 
 variable "hetzner_image" {
@@ -34,6 +34,11 @@ variable "hetzner_image" {
 variable "ssh_public_key" {
   type        = string
   description = "Full OpenSSH public key (e.g., contents of ~/.ssh/planning_poker_deploy.pub) granted access to the deploy user. Public keys are safe to commit."
+
+  validation {
+    condition     = can(regex("^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(256|384|521)) [A-Za-z0-9+/]+=*( .+)?$", trimspace(var.ssh_public_key)))
+    error_message = "ssh_public_key must be a valid OpenSSH public key (e.g., the full single-line contents of ~/.ssh/planning_poker_deploy.pub starting with 'ssh-ed25519 AAAA...'). Don't leave it as the example placeholder, paste a file path, or include only part of the key."
+  }
 }
 
 variable "ssh_allowed_cidrs" {
