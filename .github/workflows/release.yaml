@@ -1,0 +1,126 @@
+name: release
+
+# Triggered by the vX.Y.Z tag that release-please creates when its release PR
+# is merged. Builds and pushes both Docker images to GHCR, then SSHes to the
+# VPS, decrypts production secrets in CI, and restarts the compose stack.
+
+on:
+    push:
+        tags: ["v*.*.*"]
+
+permissions:
+    contents: read
+    packages: write
+
+env:
+    REGISTRY: ghcr.io
+    IMAGE_PREFIX: ${{ github.repository_owner }}/planning-poker
+
+jobs:
+    build-backend:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: docker/setup-buildx-action@v3
+            - uses: docker/login-action@v3
+              with:
+                  registry: ${{ env.REGISTRY }}
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+            - uses: docker/build-push-action@v6
+              with:
+                  context: .
+                  file: backend/Dockerfile
+                  push: true
+                  tags: |
+                      ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-backend:${{ github.ref_name }}
+                      ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-backend:latest
+                  cache-from: type=gha
+                  cache-to: type=gha,mode=max
+
+    build-frontend:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: docker/setup-buildx-action@v3
+            - uses: docker/login-action@v3
+              with:
+                  registry: ${{ env.REGISTRY }}
+                  username: ${{ github.actor }}
+                  password: ${{ secrets.GITHUB_TOKEN }}
+            - uses: docker/build-push-action@v6
+              with:
+                  context: .
+                  file: frontend/Dockerfile
+                  push: true
+                  build-args: |
+                      VITE_API_BASE_URL=https://planning-poker.knayak.dev
+                      VITE_SOCKET_BASE_URL=https://planning-poker.knayak.dev
+                      VITE_SHARE_BASE_URL=https://planning-poker.knayak.dev
+                  tags: |
+                      ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-frontend:${{ github.ref_name }}
+                      ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-frontend:latest
+                  cache-from: type=gha
+                  cache-to: type=gha,mode=max
+
+    deploy:
+        needs: [build-backend, build-frontend]
+        runs-on: ubuntu-latest
+        environment:
+            name: prod
+            url: https://${{ vars.DEPLOY_HOST }}
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Install sops
+              run: |
+                  SOPS_VERSION=v3.13.0
+                  curl -fsSL "https://github.com/getsops/sops/releases/download/${SOPS_VERSION}/sops-${SOPS_VERSION}.linux.amd64" -o /tmp/sops
+                  chmod +x /tmp/sops
+                  sudo mv /tmp/sops /usr/local/bin/sops
+
+            - name: Decrypt production secrets
+              env:
+                  SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+              run: |
+                  sops -d --output-type dotenv infra/secrets/prod.enc.yaml > /tmp/.env
+                  {
+                      echo ""
+                      echo "IMAGE_TAG=${{ github.ref_name }}"
+                      echo "GH_OWNER=${{ github.repository_owner }}"
+                  } >> /tmp/.env
+
+            - uses: webfactory/ssh-agent@v0.9.0
+              with:
+                  ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+            - name: Trust VPS host key
+              env:
+                  DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+              run: |
+                  mkdir -p ~/.ssh
+                  ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+            - name: Sync deploy bundle to VPS
+              env:
+                  DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+              run: |
+                  ssh "deploy@$DEPLOY_HOST" 'mkdir -p /opt/planning-poker'
+                  scp /tmp/.env "deploy@$DEPLOY_HOST:/opt/planning-poker/.env"
+                  scp infra/deploy/docker-compose.prod.yaml "deploy@$DEPLOY_HOST:/opt/planning-poker/"
+                  scp infra/deploy/Caddyfile "deploy@$DEPLOY_HOST:/opt/planning-poker/"
+
+            - name: Pull images and restart compose stack
+              env:
+                  DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              # Pipe the GHCR token via SSH stdin so it doesn't appear in
+              # process listings on the VPS. docker login reads from stdin
+              # then closes; subsequent compose commands don't need stdin.
+              run: |
+                  printf '%s' "$GH_TOKEN" | ssh "deploy@$DEPLOY_HOST" \
+                    "docker login ghcr.io -u '${{ github.actor }}' --password-stdin \
+                      && cd /opt/planning-poker \
+                      && docker compose -f docker-compose.prod.yaml pull \
+                      && docker compose -f docker-compose.prod.yaml up -d --remove-orphans \
+                      && docker logout ghcr.io"

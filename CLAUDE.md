@@ -146,8 +146,24 @@ The prod stack (`infra/deploy/`) runs on a single Hetzner VPS in front of Neon P
 - **Backend image** (`backend/Dockerfile`) is multi-stage: pnpm install → `prisma generate` → `tsc` → `pnpm deploy --prod` into `/opt/app`. `prisma` is a runtime dep so the same image powers the migration container.
 - **Frontend image** (`frontend/Dockerfile`) is multi-stage: pnpm install → `vite build` (with `VITE_*` baked in via build args) → static dist served by `nginx:1.27-alpine`.
 - **`infra/deploy/docker-compose.prod.yaml`** runs four services: `caddy`, `backend`, `frontend`, and a one-shot `migrator` (`prisma migrate deploy`) that backend `depends_on` via `service_completed_successfully`.
-- **Secrets** come from a `.env` file colocated with the compose file on the VPS (template in `infra/deploy/.env.example`). In a later PR this file will be SOPS-encrypted in-repo and decrypted at deploy time.
+- **Secrets** are SOPS-encrypted at `infra/secrets/prod.enc.yaml` (encrypted to the project owner's age public key, recipients tracked in `.sops.yaml`). The release workflow decrypts them in CI (`sops -d --output-type dotenv`) and scps the resulting `.env` to the VPS.
 - The build context for both Dockerfiles is the repo root (so `pnpm-lock.yaml`, `pnpm-workspace.yaml`, and `.npmrc` are reachable). `.npmrc` carries `inject-workspace-packages=true`, required by `pnpm deploy` under pnpm 10+.
+
+### Release & deploy workflow
+
+Two GitHub Actions wire the release flow end-to-end:
+
+- **`.github/workflows/release-please.yaml`** runs on every push to `main`. It maintains a single open "release PR" that bumps `package.json` and updates `CHANGELOG.md` based on conventional-commit history (`release-type: node`, manifest at `.release-please-manifest.json`). Merging the release PR creates a `vX.Y.Z` tag and a GitHub Release.
+- **`.github/workflows/release.yaml`** runs on `v*.*.*` tags. Three jobs:
+    1. `build-backend` — `docker buildx` from `backend/Dockerfile`, push to `ghcr.io/<owner>/planning-poker-backend:<tag>` and `:latest`.
+    2. `build-frontend` — same flow with `VITE_*` build args pinned to the prod domain.
+    3. `deploy` — runs in the `prod` environment. Installs sops, decrypts `infra/secrets/prod.enc.yaml` to a dotenv `.env`, appends `IMAGE_TAG=<tag>` and `GH_OWNER`, sets up an SSH agent from the `DEPLOY_SSH_KEY` secret, scps `.env` + compose + Caddyfile to `/opt/planning-poker/`, then `docker compose pull && up -d`. The GHCR token is piped to remote `docker login` over SSH stdin so it never appears in process listings on the VPS.
+
+**Required GitHub secrets**: `DEPLOY_SSH_KEY` (private SSH key for `deploy@<host>`), `SOPS_AGE_KEY` (literal `AGE-SECRET-KEY-…`).
+
+**Required GitHub variable**: `DEPLOY_HOST` (the VPS hostname; defined on the `prod` environment so future staging can override it).
+
+The `deploy` job uses GitHub Environments — first deploy will appear under "Deployments" in the repo UI and can later be gated behind required reviewers if you want a manual approval step.
 
 ### Data model highlights
 

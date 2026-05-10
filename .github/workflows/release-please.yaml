@@ -1,0 +1,22 @@
+name: release-please
+
+# Maintains a "release PR" on every push to main that bumps the version in
+# package.json and updates CHANGELOG.md based on conventional-commit history.
+# Merging the release PR creates a vX.Y.Z tag, which triggers release.yaml.
+
+on:
+    push:
+        branches: [main]
+
+permissions:
+    contents: write
+    pull-requests: write
+
+jobs:
+    release-please:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: googleapis/release-please-action@v4
+              with:
+                  config-file: release-please-config.json
+                  manifest-file: .release-please-manifest.json
