@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { useAuth } from "@/features/auth/use-auth";
 import { Link } from "react-router-dom";
 
@@ -16,6 +17,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 						Planning Poker
 					</Link>
 					<div className="flex items-center gap-3">
+						<ThemeToggle />
 						{user ? (
 							<>
 								<Badge variant="secondary">Authenticated</Badge>
