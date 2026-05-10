@@ -24,10 +24,13 @@ RUN pnpm --filter @planning-poker/backend exec prisma generate \
 FROM node:20-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /opt/app
-COPY --from=builder /opt/app/node_modules ./node_modules
-COPY --from=builder /opt/app/dist ./dist
-COPY --from=builder /opt/app/prisma ./prisma
-COPY --from=builder /opt/app/package.json ./package.json
+# Files in the builder stage are owned by root. Chown to `node` during COPY so
+# the runtime user can write to the prisma engines dir (prisma's CLI does
+# binary-resolution writes on startup, even just for `migrate deploy`).
+COPY --chown=node:node --from=builder /opt/app/node_modules ./node_modules
+COPY --chown=node:node --from=builder /opt/app/dist ./dist
+COPY --chown=node:node --from=builder /opt/app/prisma ./prisma
+COPY --chown=node:node --from=builder /opt/app/package.json ./package.json
 USER node
 EXPOSE 4000
 CMD ["node", "dist/server.js"]
