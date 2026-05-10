@@ -9,7 +9,17 @@ This is a pnpm monorepo. Run commands from the repo root unless otherwise noted.
 **Infrastructure (required before running the app):**
 
 ```bash
-docker compose up -d        # start Postgres (5432) and Redis (6379)
+docker compose up -d                              # start Postgres (5432) and Redis (6379)
+docker compose --profile gateway up -d            # also start the nginx API gateway on :8080
+docker compose --profile gateway down             # stop everything including the gateway
+```
+
+The gateway is opt-in via the `gateway` profile so the default `docker compose up -d` keeps the existing dev experience (backend on :4000, vite on :5173, no proxy). When the gateway is running, the app is reachable end-to-end at `http://localhost:8080`. See `infra/nginx/nginx.conf` and §14 of `planning-poker-technical-spec.md`.
+
+When you run **with** the gateway profile, the backend must be told it's behind a proxy or its identity keys collapse to the gateway's docker-bridge IP:
+
+```bash
+TRUST_PROXY=1 CORS_ORIGIN=http://localhost:5173,http://localhost:8080 pnpm --filter @planning-poker/backend dev
 ```
 
 **Development:**
@@ -71,7 +81,7 @@ Backend runs on port 4000; frontend on 5173. The frontend proxies all `/api` cal
 
 - `config/env.ts` — zod-validated env vars with sensible defaults. All server config flows from here.
 - `middleware/auth.ts` — `optionalAuth` (populates `req.auth` or `req.anonId`) and `requireAuth` (401 guard). Both middlewares parse Bearer token + `anon_token` cookie.
-- `lib/identity.ts` — `buildIdentityKey(primaryId, fp, ip)` builds the canonical `id:|fp:|ip:` key from primitives. `buildIdentityKeyFromRequest(req, primaryId)` is the HTTP-route convenience wrapper. For WebSocket connections, the socket middleware in `realtime/socket.ts` calls `buildIdentityKey` directly using values from the handshake — the client never supplies its own identity key.
+- `lib/identity.ts` — `buildIdentityKey(primaryId, fp, ip)` builds the canonical `id:|fp:|ip:` key from primitives. `buildIdentityKeyFromRequest(req, primaryId)` is the HTTP-route convenience wrapper (relies on Express's `trust proxy` setting so `req.ip` resolves the real client IP from `X-Forwarded-For`). `resolveClientIp(socketAddress, xffHeader, trustProxy)` is the Socket.IO equivalent — it mirrors Express semantics by walking `[...XFF, socket.handshake.address]` and skipping `TRUST_PROXY` trusted hops from the right. The socket middleware in `realtime/socket.ts` uses this so identity keys remain stable behind an API gateway. The client never supplies its own identity key.
 - `lib/prisma.ts` / `lib/redis.ts` — singleton clients.
 - `lib/asyncHandler.ts` — wraps async Express route handlers so rejected promises propagate to `next(err)`. All route files use it. A global error middleware in app.ts catches anything that reaches it and returns `{ error: "INTERNAL_ERROR" }`.
 - `modules/auth/` — local registration/login (bcrypt), JWT signing/verification (access 2d, refresh 30d), anonymous bootstrap endpoint.
@@ -79,7 +89,7 @@ Backend runs on port 4000; frontend on 5173. The frontend proxies all `/api` cal
 - `modules/bans/` — REST: owner applies/views/lifts room bans.
 - `modules/users/` — REST: `GET /api/users/me`, username claim.
 - `modules/audit/service.ts` — `writeAuditEvent(tx, ...)`. Always call this inside a Prisma transaction; never outside one.
-- `modules/realtime/socket.ts` — all `Socket.IO` logic. Namespace `/room`. A `nsp.use()` middleware builds the identity key server-side from `socket.handshake.auth.token` (JWT), the `anon_token` HttpOnly cookie, and `socket.handshake.address` (IP). Votes stored in Redis hash `room:{id}:votes`; member presence in Redis set `room:{id}:members` (used for `SCARD` capacity check); session heartbeat key `session:{identityKey}:{roomId}` with 60s TTL enables reconnect detection and vote restoration. Handles `room:kick` and `room:ban` (owner-only; disconnects target socket, updates DB and Redis). The frontend passes `auth: { token, fingerprint }` in the `io()` call.
+- `modules/realtime/socket.ts` — all `Socket.IO` logic. Namespace `/room`. A `nsp.use()` middleware builds the identity key server-side from `socket.handshake.auth.token` (JWT), the `anon_token` HttpOnly cookie, and the client IP resolved by `resolveClientIp` (reads `X-Forwarded-For` when running behind a trusted gateway, otherwise falls back to `socket.handshake.address`). Votes stored in Redis hash `room:{id}:votes`; member presence in Redis set `room:{id}:members` (used for `SCARD` capacity check); session heartbeat key `session:{identityKey}:{roomId}` with 60s TTL enables reconnect detection and vote restoration. Handles `room:kick` and `room:ban` (owner-only; disconnects target socket, updates DB and Redis). The frontend passes `auth: { token, fingerprint }` in the `io()` call.
 
 **Authentication flow:** frontend POSTs to `/api/auth/anon/bootstrap` on load (sets `anon_token` HttpOnly cookie), then attempts `/api/auth/refresh` to hydrate the access token from the `refresh_token` cookie. `apiFetch()` in `frontend/src/lib/http.ts` handles the 401 → refresh → retry cycle automatically.
 
@@ -96,6 +106,18 @@ Backend runs on port 4000; frontend on 5173. The frontend proxies all `/api` cal
 **UI components** live in `components/ui/` — these are shadcn-style primitives built on Tailwind + `class-variance-authority`.
 
 **Stats logic** (`features/room/stats.ts`): pure function; computes average, median, consensus, `?` count, `☕` count from a revealed vote map. `?` and `☕` are excluded from numeric calculations.
+
+### Edge / API gateway
+
+A dev nginx gateway lives at `infra/nginx/nginx.conf`. It's wired into `docker-compose.yml` under the `gateway` profile so it's opt-in.
+
+- **`TRUST_PROXY` env var** (default `0`) is the number of upstream proxies between the public client and Express. Set to `1` when the gateway is in front (Express's `req.ip` and the WebSocket `resolveClientIp` helper both honour it).
+- **Gateway responsibilities (today)**: HTTP rate-limit zones (`api`, `auth`, `conn`), request-id injection, X-Forwarded-For overwrite (does not append, so it's unspoofable), X-Forwarded-Proto forwarding, WebSocket upgrade for `/socket.io/`, vite-HMR pass-through for `/`.
+- **Gateway responsibilities (deferred to Phase 11 follow-ups)**: TLS termination, CORS (currently still on the backend — backend `CORS_ORIGIN` must include `http://localhost:8080` while the gateway is in use), serving the frontend `dist/` directly instead of proxying to vite, sticky sessions once a second backend instance exists.
+- **Backend responsibilities**: JWT verification, auth-aware rate limiting, Socket.IO event-level rate limiting (event throttling cannot live at the HTTP gateway because once the WebSocket is upgraded the gateway sees only an opaque TCP stream).
+- **Critical contract**: the gateway must overwrite `X-Forwarded-For` on ingress (`proxy_set_header X-Forwarded-For $remote_addr;`, never `$proxy_add_x_forwarded_for`). It must also forward `X-Forwarded-Proto` so cookies marked `Secure` are emitted under HTTPS.
+
+See §14 of `planning-poker-technical-spec.md` for the full design.
 
 ### Data model highlights
 
@@ -116,9 +138,10 @@ The valid vote values (1 2 3 5 8 13 21 34 55 89 ? ☕) are defined in two places
 
 Per the implementation checklist in `planning-poker-technical-spec.md`:
 
-- Redis adapter for Socket.IO (horizontal scaling across multiple Node instances)
+- Redis adapter for Socket.IO (horizontal scaling across multiple Node instances) — **next** after the gateway lands, since multi-instance routing is the trigger for needing it
 - Full Redis-backed reconnect window: disconnect currently sets `leftAt` immediately; the 60 s grace period described in §3.5 requires a deferred cleanup job
-- Rate limiting and hCaptcha
+- Rate limiting and hCaptcha — see §4 and §14 of the spec for the split between gateway-level (HTTP) and backend-level (auth-aware + WS-event) rate limiting
+- nginx API gateway: dev profile shipped (`infra/nginx/nginx.conf`, `--profile gateway`); Phase 11 follow-ups remaining are TLS termination, moving CORS off the backend, serving the frontend `dist/` instead of proxying to vite, and sticky sessions once a second backend instance exists
 - Vote state sync cron and daily cleanup job
 - Owner moderation UI on the frontend (ban/list/lift)
 - Frontend tests (Vitest + RTL)

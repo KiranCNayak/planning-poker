@@ -1,10 +1,7 @@
 services:
     postgres:
         image: postgres:16
-        environment:
-            POSTGRES_USER: ${POSTGRES_USER}
-            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-            POSTGRES_DB: ${POSTGRES_DB}
+        env_file: backend/.env
         ports:
             - "5432:5432"
         volumes:
@@ -24,6 +21,26 @@ services:
             - redis_data:/data
         healthcheck:
             test: ["CMD", "redis-cli", "ping"]
+            interval: 5s
+            timeout: 5s
+            retries: 5
+
+    # API gateway. Opt-in: only starts with `--profile gateway`.
+    # See infra/nginx/nginx.conf and §14 of planning-poker-technical-spec.md.
+    nginx:
+        image: nginx:1.27-alpine
+        profiles: ["gateway"]
+        ports:
+            - "8080:80"
+        volumes:
+            - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+        # `host.docker.internal:host-gateway` is the cross-platform way to
+        # reach services running on the host (pnpm dev backend on :4000,
+        # vite on :5173). Required on Linux; harmless on Docker Desktop.
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
+        healthcheck:
+            test: ["CMD", "wget", "-qO-", "http://localhost/__nginx_health"]
             interval: 5s
             timeout: 5s
             retries: 5

@@ -21,6 +21,10 @@ const schema = z.object({
 	ROOM_CAPACITY_LIMIT: z.coerce.number().default(100),
 	FINGERPRINT_SALT: z.string().min(8).default("change-me-salt"),
 	CORS_ORIGIN: z.string().default("http://localhost:5173"),
+	// Number of trusted upstream proxies between the client and this server.
+	// 0 = direct (no gateway). Set to 1 behind a single nginx/API gateway that
+	// forwards X-Forwarded-For. Mirrors Express's `trust proxy` semantics.
+	TRUST_PROXY: z.coerce.number().int().min(0).default(0),
 });
 
 export const env = schema.parse(process.env);

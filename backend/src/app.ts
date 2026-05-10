@@ -6,7 +6,7 @@ import express, {
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import helmet from "helmet";
-import { corsOrigins } from "./config/env.js";
+import { corsOrigins, env } from "./config/env.js";
 import { optionalAuth } from "./middleware/auth.js";
 import { authRouter } from "./modules/auth/routes.js";
 import { roomsRouter } from "./modules/rooms/routes.js";
@@ -15,6 +15,10 @@ import { bansRouter } from "./modules/bans/routes.js";
 
 export const createApp = () => {
 	const app = express();
+	// Required so req.ip resolves the real client IP from X-Forwarded-For when
+	// the app runs behind nginx/an API gateway. Without this, every request
+	// shares the gateway's internal IP, which corrupts identity keys.
+	app.set("trust proxy", env.TRUST_PROXY);
 	app.use(helmet());
 	app.use(cors({ origin: corsOrigins, credentials: true }));
 	app.use(express.json());

@@ -3,9 +3,9 @@ import type { Server as HttpServer } from "http";
 import crypto from "node:crypto";
 import { prisma } from "../../lib/prisma.js";
 import { redis } from "../../lib/redis.js";
-import { corsOrigins } from "../../config/env.js";
+import { corsOrigins, env } from "../../config/env.js";
 import { verifyAccessToken, verifyAnonToken } from "../auth/tokens.js";
-import { buildIdentityKey } from "../../lib/identity.js";
+import { buildIdentityKey, resolveClientIp } from "../../lib/identity.js";
 
 // Keep in sync with frontend/src/lib/deck.ts
 const VOTE_VALUES = new Set([
@@ -56,7 +56,11 @@ export const initSocket = (httpServer: HttpServer) => {
 			const fp =
 				(socket.handshake.auth.fingerprint as string | undefined) ??
 				"unknown";
-			const ip = socket.handshake.address;
+			const ip = resolveClientIp(
+				socket.handshake.address,
+				socket.handshake.headers["x-forwarded-for"],
+				env.TRUST_PROXY,
+			);
 
 			let primaryId: string | undefined;
 

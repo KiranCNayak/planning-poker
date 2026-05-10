@@ -20,6 +20,7 @@
 11. [Scaling and infrastructure](#11-scaling-and-infrastructure)
 12. [Cleanup and maintenance jobs](#12-cleanup-and-maintenance-jobs)
 13. [Implementation checklist](#13-implementation-checklist)
+14. [Edge / API gateway](#14-edge--api-gateway)
 
 ---
 
@@ -648,6 +649,144 @@ Use this as a build order. Each section should be completed and tested before mo
 - [ ] Confirm `audit_logs` is truly append-only (attempt UPDATE/DELETE as app user, expect failure)
 - [ ] Confirm short_code collision retry works
 - [ ] Add FE smoke tests (routing/auth guard/room render) after API contract stabilizes
+
+### Phase 11 — Edge / API gateway
+
+See §14 for the design rationale. This phase is the rollout of that design. The dev gateway lives at `infra/nginx/nginx.conf` and is opt-in via `docker compose --profile gateway up -d`.
+
+- [x] Stand up nginx in front of the Node backend (single instance to start) — dev container under `gateway` profile, listening on `:8080`
+- [ ] TLS termination at nginx; backend stays HTTP on the internal network — deferred to prod
+- [x] `proxy_set_header X-Forwarded-For $remote_addr;` (overwrite, not append) so untrusted clients cannot spoof their IP
+- [x] `proxy_set_header X-Forwarded-Proto $scheme;` so `Secure` cookies are emitted under HTTPS
+- [x] Set `TRUST_PROXY=1` in the backend env when the gateway is in front — documented in CLAUDE.md
+- [x] WebSocket upgrade config: `proxy_http_version 1.1`, `proxy_set_header Upgrade $http_upgrade`, `proxy_set_header Connection "upgrade"`, generous `proxy_read_timeout` (1h)
+- [x] Pass `Set-Cookie` headers through unmodified — verified: `anon_token` cookie round-trips intact via `/api/auth/anon/bootstrap`
+- [ ] Move CORS to the gateway and remove the `cors()` middleware from `app.ts` (single source of truth) — config has the `add_header` block ready behind a comment; flip when removing backend `cors()` in the same change
+- [x] `X-Request-Id` injection at the gateway; backend logs it on every request — gateway side done; backend logging integration pending
+- [x] HTTP-level rate limiting at the gateway (`limit_req_zone`) — `api`, `auth`, and `conn` zones declared; dev-friendly limits, retune for prod
+- [ ] Auth-aware rate limiting in the backend (Redis sliding window keyed on userId → anon_token hash → IP fallback). Per §4.1 with the `1.2×` exemption for `/api/auth/anon/bootstrap` and `/api/auth/refresh`
+- [ ] Sticky sessions for `/socket.io` (`ip_hash` or cookie-based) **until** the Redis adapter ships and removes the requirement — `ip_hash` line included as a commented-out toggle in the upstream block
+- [x] Health check endpoint `/__nginx_health` consumed by docker healthcheck; backend `/health` reachable through gateway via direct location once added
+- [ ] Socket.IO event-level rate limiter in the namespace middleware (Redis sliding window per-event-name + identity key) — see §14.6 for suggested caps
+
+---
+
+## 14. Edge / API gateway
+
+The backend is built to run behind an nginx-based API gateway. Even with a single backend service today, the boundary is intentional: it consolidates concerns (TLS, CORS, request-id, IP-level throttling) at the edge and keeps the application server focused on business logic. This section captures the contract, the trade-offs, and the open questions so the implementation can land incrementally.
+
+### 14.1 Topology
+
+```text
+client ──HTTPS──▶ nginx (gateway)  ──HTTP──▶ Node backend (Express + Socket.IO)
+                  │                          │
+                  │                          ├── Postgres
+                  │                          └── Redis (rate limit + presence + votes)
+                  └── (future) Redis pub/sub for Socket.IO adapter
+```
+
+Single nginx instance to start. Sticky sessions are required only until the Socket.IO Redis adapter (§11.1) is enabled; afterwards nginx can round-robin across multiple Node instances.
+
+### 14.2 Concern split
+
+| Concern                               | Gateway (nginx)  | Backend (Node)                                   |
+| ------------------------------------- | ---------------- | ------------------------------------------------ |
+| TLS termination                       | yes              | no (HTTP internally)                             |
+| CORS                                  | yes (sole owner) | no (`cors()` middleware removed once GW is live) |
+| Request-id injection (`X-Request-Id`) | yes              | logs it, propagates to downstream                |
+| HTTP-level rate limiting (per-IP)     | yes              | no                                               |
+| Auth-aware rate limiting              | no               | yes (per-user / per-anon / per-IP)               |
+| Socket.IO event-level rate limiting   | no (invisible)   | yes (Socket.IO namespace middleware)             |
+| JWT verification                      | no               | yes (single source of truth)                     |
+| Cookie rewriting                      | never            | sole emitter of `Set-Cookie`                     |
+| Sticky sessions for Socket.IO         | yes (interim)    | n/a after Redis adapter lands                    |
+| Health check (`/health`)              | consumes         | exposes                                          |
+
+JWT verification stays at the backend on purpose: the app has three secrets (access, refresh, anon) and the identity-key construction is tightly coupled to token parsing. Verifying at the gateway would force secret proliferation and duplicate auth logic.
+
+### 14.3 Trust-proxy contract
+
+The backend honours an opt-in `TRUST_PROXY` env var (integer, default `0`) that mirrors Express's `trust proxy` semantics:
+
+- HTTP: `app.set('trust proxy', env.TRUST_PROXY)` is set in `app.ts` so `req.ip` walks the `X-Forwarded-For` chain correctly.
+- WebSocket: `lib/identity.ts → resolveClientIp` performs the same walk for Socket.IO connections, which do not benefit from Express's helper.
+
+The gateway **must** overwrite `X-Forwarded-For` on ingress:
+
+```nginx
+proxy_set_header X-Forwarded-For $remote_addr;
+```
+
+`$proxy_add_x_forwarded_for` (the more common snippet) **appends** to whatever the client sent, allowing trivial spoofing of the leftmost entry. Use `$remote_addr` instead.
+
+`X-Forwarded-Proto $scheme` must also be set so the backend emits `Secure` cookies under HTTPS even though it sees plain HTTP internally.
+
+Why this matters: every identity key contains a hashed IP component. Without trust-proxy configured, every user behind the gateway shares the gateway's internal IP — collapsing distinct clients into one identity key for ban / session / audit purposes. This is silent corruption, not a visible error.
+
+### 14.4 Cookie pass-through
+
+`anon_token` and `refresh_token` are HttpOnly cookies emitted by `/api/auth/anon/bootstrap` and `/api/auth/refresh`. The gateway forwards `Set-Cookie` headers verbatim — no domain rewriting, no `SameSite` mutation, no path stripping. Keep `proxy_pass_header Set-Cookie` defaults; do not add `proxy_cookie_domain` or `proxy_cookie_path` directives unless the gateway and backend live on different visible hostnames (in which case the backend, not the gateway, is updated to emit the right domain).
+
+### 14.5 Socket.IO transport
+
+Two failure modes the gateway needs to address:
+
+1. **Negotiation split-brain** — Socket.IO opens with HTTP long-polling, then upgrades to WebSocket. During the handshake there are multiple HTTP requests; if any of them hit a different backend instance, the upgrade fails. Mitigations:
+    - Sticky sessions at the gateway (`ip_hash` or a cookie-based affinity), OR
+    - Force WebSocket-only transports (`io({ transports: ['websocket'] })`) — eliminates polling entirely at the cost of a small compatibility window.
+2. **WebSocket idle timeouts** — nginx defaults `proxy_read_timeout` to 60s. Long-lived voting sessions break. Set it to at least 1h and rely on Socket.IO's heartbeat (which we already use for presence).
+
+Once `@socket.io/redis-adapter` is enabled (§11.1), state lives in Redis pub/sub and sticky sessions become a defence-in-depth, not a correctness requirement.
+
+### 14.6 Rate limiting
+
+Two layers; do **not** duplicate the same limit at both.
+
+**Layer 1 — gateway, per-IP, coarse.** `limit_req_zone $binary_remote_addr zone=api:10m rate=20r/s burst=40 nodelay;` (illustrative). This is the abuse-floor protection — it stops a single IP from saturating the upstream — and runs before any backend code executes.
+
+**Layer 2 — backend, identity-aware, fine.** Implements the §4.1 policy. Counters live in Redis (sliding window via sorted sets). The rate-limit key is composite, derived by the same precedence chain as identity:
+
+1. `user:{userId}` if a valid access JWT is present
+2. `anon:{sha256(anon_token)}` if the anon cookie is present
+3. `ip:{client_ip}` as the last resort
+
+This means the limiter must run **after** `optionalAuth`. Anonymous bursts can still be tracked even before a user logs in.
+
+**Bootstrap/refresh exemption.** `/api/auth/anon/bootstrap` and `/api/auth/refresh` participate in the standard limiter but receive a `1.2×` window (i.e. 20% headroom) — these endpoints are part of the automatic 401 → refresh → retry cycle in `apiFetch`, and a tight cap can trap legitimate clients in an inescapable 429 loop.
+
+**WebSocket events.** A connected socket can fire `room:vote`, `room:join`, `room:reveal`, etc. at unbounded rate; the HTTP gateway never sees these. Event-level rate limiting lives in the Socket.IO namespace middleware, keyed on `(identityKey, eventName)` against a Redis sliding window. Suggested initial caps:
+
+| Event         | Limit           |
+| ------------- | --------------- |
+| `room:vote`   | 30 per 10 s     |
+| `room:reveal` | 5 per 10 s      |
+| `room:hide`   | 5 per 10 s      |
+| `room:reset`  | 5 per 10 s      |
+| `room:kick`   | 10 per 1 minute |
+| `room:ban`    | 10 per 1 minute |
+| `room:join`   | 5 per 1 minute  |
+
+Limits are tunable; the point is to have an event-aware mechanism in place from day one of the gateway rollout. We may later extract this into the gateway as a custom Lua/OpenResty layer or a sidecar service, but for now it stays in-process.
+
+### 14.7 Decisions log
+
+Captured during the design conversation; recorded here so future contributors can see the trade-offs:
+
+- **Gateway choice → nginx.** Battle-tested WebSocket proxying, minimal config, no plugin layer to maintain. Kong/KrakenD considered and rejected as overkill for the current scope.
+- **JWT verification → backend only.** Avoids secret proliferation across services and keeps identity logic in one place.
+- **CORS → gateway only.** Once the gateway lands, the `cors()` middleware in `app.ts` is removed. Two CORS layers cause duplicate `Access-Control-Allow-Origin` headers, which browsers reject.
+- **Cookies → gateway passes through unchanged.** Backend remains the sole emitter and authority for `Set-Cookie`.
+- **Auth-aware rate limiting → backend.** The gateway plus Lua would have to re-implement JWT/anon-token parsing; better to share `optionalAuth` with the rest of the stack.
+- **WebSocket event throttling → backend (Socket.IO middleware).** The gateway is blind to events once the connection is upgraded; revisit only if a separate edge service emerges.
+- **Bootstrap / refresh limits get 1.2× headroom.** Protects the 401-refresh-retry loop from rate-limit deadlock.
+- **Trust-proxy is opt-in via `TRUST_PROXY` env.** Defaults to 0 so dev/test stay correct without a gateway; production sets it to the real hop count.
+
+### 14.8 Open follow-ups
+
+- Decide between `ip_hash` and Socket.IO-cookie-based stickiness once we benchmark — `ip_hash` interacts poorly with NAT'd corporate networks.
+- Define the Socket.IO Redis adapter rollout (depends on §11.1).
+- Once `rate_limit_violations` is wired (§4.3), feed gateway-level 429s into it via a backend ingest endpoint or a shared Redis counter.
+- Decide whether to host static frontend assets at the gateway (saves a hop) or behind a CDN — out of scope for the first cut.
 
 ---
 

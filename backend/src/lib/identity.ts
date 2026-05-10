@@ -18,3 +18,32 @@ export const buildIdentityKeyFromRequest = (req: Request, primaryId: string) =>
 		req.header("x-fingerprint") ?? "unknown",
 		req.ip ?? "unknown",
 	);
+
+/**
+ * Resolves the real client IP for a Socket.IO connection.
+ *
+ * Mirrors Express's `trust proxy = N` semantics: the address chain is
+ * `[...X-Forwarded-For entries, socket.handshake.address]`, and we skip
+ * `N` trusted hops from the right end. With TRUST_PROXY=0 the socket
+ * address is returned verbatim; with TRUST_PROXY=1 behind one gateway
+ * that emits `X-Forwarded-For: <client>`, the client IP is returned.
+ *
+ * The gateway MUST overwrite (not append) X-Forwarded-For on ingress so
+ * untrusted clients cannot spoof their apparent IP.
+ */
+export const resolveClientIp = (
+	socketAddress: string,
+	xffHeader: string | string[] | undefined,
+	trustProxy: number,
+): string => {
+	const raw = Array.isArray(xffHeader)
+		? xffHeader.join(",")
+		: (xffHeader ?? "");
+	const xffList = raw
+		.split(",")
+		.map((s) => s.trim())
+		.filter(Boolean);
+	const chain = [...xffList, socketAddress];
+	const skip = Math.max(0, Math.min(trustProxy, chain.length - 1));
+	return chain[chain.length - 1 - skip] ?? socketAddress;
+};

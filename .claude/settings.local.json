@@ -7,7 +7,10 @@
 			"Bash(pnpm prisma *)",
 			"Bash(pnpm lint *)",
 			"Bash(pnpm format:check)",
-			"Bash(pnpm format *)"
+			"Bash(pnpm format *)",
+			"Bash(docker run *)",
+			"Bash(docker compose *)",
+			"Bash(make help *)"
 		]
 	}
 }
