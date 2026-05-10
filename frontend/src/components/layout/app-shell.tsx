@@ -2,6 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { useAuth } from "@/features/auth/use-auth";
+import { APP_VERSION } from "@/lib/config";
 import { Link } from "react-router-dom";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -62,6 +63,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 			<main className="mx-auto w-full max-w-6xl px-4 py-8">
 				{children}
 			</main>
+			<footer className="mx-auto w-full max-w-6xl px-4 pb-4 text-right text-xs text-muted-foreground">
+				{APP_VERSION}
+			</footer>
 		</div>
 	);
 }

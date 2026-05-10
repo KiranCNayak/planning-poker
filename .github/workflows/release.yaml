@@ -70,6 +70,7 @@ jobs:
                       VITE_API_BASE_URL=https://planning-poker.knayak.dev
                       VITE_SOCKET_BASE_URL=https://planning-poker.knayak.dev
                       VITE_SHARE_BASE_URL=https://planning-poker.knayak.dev
+                      VITE_APP_VERSION=${{ github.ref_name }}
                   tags: |
                       ${{ env.IMAGE_PREFIX }}-frontend:${{ github.ref_name }}
                       ${{ env.IMAGE_PREFIX }}-frontend:latest
